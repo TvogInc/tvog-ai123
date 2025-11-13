@@ -91,6 +91,29 @@ const Auth = () => {
     }
   };
 
+  const handleGuestMode = async () => {
+    setLoading(true);
+    try {
+      const { error } = await supabase.auth.signInAnonymously();
+
+      if (error) throw error;
+
+      toast({
+        title: "Guest Mode",
+        description: "Signed in as guest. Your data won't be saved permanently.",
+      });
+      navigate("/");
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-bg">
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,rgba(20,184,166,0.1),transparent_50%)]" />
@@ -184,14 +207,29 @@ const Auth = () => {
           </Button>
         </form>
 
-        <div className="text-center text-sm">
+        <div className="text-center space-y-3">
           <button
             type="button"
             onClick={() => setIsSignUp(!isSignUp)}
-            className="text-primary hover:underline"
+            className="text-primary hover:underline text-sm"
           >
             {isSignUp ? "Already have an account? Sign in" : "Don't have an account? Sign up"}
           </button>
+          
+          <div className="pt-2 border-t border-border">
+            <Button
+              onClick={handleGuestMode}
+              variant="outline"
+              className="w-full"
+              disabled={loading}
+              type="button"
+            >
+              Continue as Guest
+            </Button>
+            <p className="text-xs text-muted-foreground mt-2">
+              Try without an account - your chats won't be saved
+            </p>
+          </div>
         </div>
       </Card>
     </div>
