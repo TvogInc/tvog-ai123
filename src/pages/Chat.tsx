@@ -4,8 +4,9 @@ import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
-import { Send, LogOut, Plus, Sparkles } from "lucide-react";
+import { Send, LogOut, Plus, Sparkles, Search, User } from "lucide-react";
 import { CodeBlock } from "@/components/CodeBlock";
 
 interface Message {
@@ -27,6 +28,7 @@ const Chat = () => {
   const [currentConversation, setCurrentConversation] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const navigate = useNavigate();
   const { toast } = useToast();
@@ -309,7 +311,7 @@ const Chat = () => {
     <div className="flex h-screen bg-background">
       {/* Sidebar */}
       <div className="w-64 border-r border-border bg-card flex flex-col">
-        <div className="p-4 border-b border-border">
+        <div className="p-4 border-b border-border space-y-3">
           <Button
             onClick={createNewConversation}
             className="w-full bg-gradient-primary hover:opacity-90"
@@ -317,28 +319,57 @@ const Chat = () => {
             <Plus className="w-4 h-4 mr-2" />
             New Chat
           </Button>
+          
+          <div className="relative">
+            <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="Search conversations..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-10"
+            />
+          </div>
         </div>
 
         <ScrollArea className="flex-1 p-4">
-          {conversations.map((conv) => (
-            <button
-              key={conv.id}
-              onClick={() => {
-                setCurrentConversation(conv.id);
-                loadMessages(conv.id);
-              }}
-              className={`w-full text-left p-3 rounded-lg mb-2 transition-colors ${
-                currentConversation === conv.id
-                  ? "bg-secondary"
-                  : "hover:bg-secondary/50"
-              }`}
-            >
-              <p className="truncate text-sm">{conv.title}</p>
-            </button>
-          ))}
+          {conversations
+            .filter((conv) =>
+              conv.title.toLowerCase().includes(searchQuery.toLowerCase())
+            )
+            .map((conv) => (
+              <button
+                key={conv.id}
+                onClick={() => {
+                  setCurrentConversation(conv.id);
+                  loadMessages(conv.id);
+                }}
+                className={`w-full text-left p-3 rounded-lg mb-2 transition-colors ${
+                  currentConversation === conv.id
+                    ? "bg-secondary"
+                    : "hover:bg-secondary/50"
+                }`}
+              >
+                <p className="truncate text-sm">{conv.title}</p>
+              </button>
+            ))}
+          {conversations.filter((conv) =>
+            conv.title.toLowerCase().includes(searchQuery.toLowerCase())
+          ).length === 0 && (
+            <p className="text-center text-sm text-muted-foreground mt-4">
+              {searchQuery ? "No conversations found" : "No conversations yet"}
+            </p>
+          )}
         </ScrollArea>
 
-        <div className="p-4 border-t border-border">
+        <div className="p-4 border-t border-border space-y-2">
+          <Button
+            onClick={() => navigate("/profile")}
+            variant="outline"
+            className="w-full"
+          >
+            <User className="w-4 h-4 mr-2" />
+            Profile
+          </Button>
           <Button
             onClick={handleSignOut}
             variant="outline"
