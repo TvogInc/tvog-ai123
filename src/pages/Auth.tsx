@@ -6,26 +6,15 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
-import { Sparkles, Mail, Lock, Copy, Check } from "lucide-react";
+import { Sparkles, Mail, Lock } from "lucide-react";
 
 const Auth = () => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isSignUp, setIsSignUp] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [copied, setCopied] = useState(false);
   const navigate = useNavigate();
   const { toast } = useToast();
-
-  const codeSnippet = `// Welcome to Tvog AI
-import { TvogAI } from '@tvog/core';
-
-const ai = new TvogAI({
-  model: 'gemini-2.5-flash',
-  streaming: true
-});
-
-await ai.chat('Hello, Tvog!');`;
 
   useEffect(() => {
     const checkAuth = async () => {
@@ -106,16 +95,6 @@ await ai.chat('Hello, Tvog!');`;
     }
   };
 
-  const copyCode = async () => {
-    await navigator.clipboard.writeText(codeSnippet);
-    setCopied(true);
-    toast({
-      title: "Copied!",
-      description: "Code snippet copied to clipboard",
-    });
-    setTimeout(() => setCopied(false), 2000);
-  };
-
   return (
     <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-bg">
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,rgba(20,184,166,0.1),transparent_50%)]" />
@@ -129,37 +108,6 @@ await ai.chat('Hello, Tvog!');`;
           <p className="text-muted-foreground">
             {isSignUp ? "Create your account" : "Welcome back"}
           </p>
-        </div>
-
-        {/* Terminal Window */}
-        <div className="rounded-lg overflow-hidden border border-border/50 bg-muted/30 shadow-soft">
-          <div className="bg-muted/50 px-4 py-2 flex items-center justify-between border-b border-border/50">
-            <div className="flex items-center gap-2">
-              <div className="flex gap-1.5">
-                <div className="w-3 h-3 rounded-full bg-destructive/60" />
-                <div className="w-3 h-3 rounded-full bg-yellow-500/60" />
-                <div className="w-3 h-3 rounded-full bg-primary/60" />
-              </div>
-              <span className="text-xs text-muted-foreground font-mono">tvog-setup.ts</span>
-            </div>
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={copyCode}
-              className="h-6 px-2 hover:bg-primary/10"
-            >
-              {copied ? (
-                <Check className="w-3 h-3 text-primary" />
-              ) : (
-                <Copy className="w-3 h-3" />
-              )}
-            </Button>
-          </div>
-          <div className="p-4 font-mono text-xs leading-relaxed">
-            <pre className="text-foreground/90">
-              <code>{codeSnippet}</code>
-            </pre>
-          </div>
         </div>
 
         <form onSubmit={handleAuth} className="space-y-4">
