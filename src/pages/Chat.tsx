@@ -6,6 +6,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useToast } from "@/hooks/use-toast";
 import { Send, LogOut, Plus, Sparkles } from "lucide-react";
+import { CodeBlock } from "@/components/CodeBlock";
 
 interface Message {
   id: string;
@@ -264,6 +265,46 @@ const Chat = () => {
     navigate("/auth");
   };
 
+  const renderMessageContent = (content: string) => {
+    const parts: JSX.Element[] = [];
+    const codeBlockRegex = /```(\w+)?\n([\s\S]*?)```/g;
+    let lastIndex = 0;
+    let match;
+
+    while ((match = codeBlockRegex.exec(content)) !== null) {
+      // Add text before code block
+      if (match.index > lastIndex) {
+        const textBefore = content.slice(lastIndex, match.index);
+        parts.push(
+          <span key={`text-${lastIndex}`} className="whitespace-pre-wrap">
+            {textBefore}
+          </span>
+        );
+      }
+
+      // Add code block
+      const language = match[1] || "code";
+      const code = match[2];
+      parts.push(
+        <CodeBlock key={`code-${match.index}`} code={code} language={language} />
+      );
+
+      lastIndex = match.index + match[0].length;
+    }
+
+    // Add remaining text
+    if (lastIndex < content.length) {
+      const remainingText = content.slice(lastIndex);
+      parts.push(
+        <span key={`text-${lastIndex}`} className="whitespace-pre-wrap">
+          {remainingText}
+        </span>
+      );
+    }
+
+    return parts.length > 0 ? parts : <span className="whitespace-pre-wrap">{content}</span>;
+  };
+
   return (
     <div className="flex h-screen bg-background">
       {/* Sidebar */}
@@ -352,7 +393,11 @@ const Chat = () => {
                         : "bg-card border border-border"
                     }`}
                   >
-                    <p className="whitespace-pre-wrap">{message.content}</p>
+                    {message.role === "assistant" ? (
+                      <div>{renderMessageContent(message.content)}</div>
+                    ) : (
+                      <p className="whitespace-pre-wrap">{message.content}</p>
+                    )}
                   </div>
                 </div>
               ))}
