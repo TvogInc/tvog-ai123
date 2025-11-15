@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { Send, LogOut, Plus, Sparkles, Search, User } from "lucide-react";
 import { CodeBlock } from "@/components/CodeBlock";
+import { z } from "zod";
 
 interface Message {
   id: string;
@@ -21,6 +22,15 @@ interface Conversation {
   title: string;
   created_at: string;
 }
+
+const messageSchema = z.object({
+  content: z.string()
+    .trim()
+    .min(1, "Message cannot be empty")
+    .max(4000, "Message must be less than 4000 characters")
+});
+
+const MAX_MESSAGE_LENGTH = 4000;
 
 const Chat = () => {
   const [user, setUser] = useState<any>(null);
@@ -114,7 +124,22 @@ const Chat = () => {
 
   const sendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!input.trim() || !user || isLoading) return;
+    if (!user || isLoading) return;
+
+    // Validate message input
+    try {
+      const validated = messageSchema.parse({ content: input });
+      // Use validated.content for further processing
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        toast({
+          title: "Invalid message",
+          description: error.errors[0].message,
+          variant: "destructive",
+        });
+        return;
+      }
+    }
 
     let conversationId = currentConversation;
 
@@ -437,7 +462,7 @@ const Chat = () => {
         </ScrollArea>
 
         <div className="p-4 border-t border-border bg-card">
-          <form onSubmit={sendMessage} className="max-w-3xl mx-auto">
+          <form onSubmit={sendMessage} className="max-w-3xl mx-auto space-y-2">
             <div className="flex gap-2">
               <Textarea
                 value={input}
@@ -450,6 +475,7 @@ const Chat = () => {
                     sendMessage(e);
                   }
                 }}
+                maxLength={MAX_MESSAGE_LENGTH}
               />
               <Button
                 type="submit"
@@ -458,6 +484,9 @@ const Chat = () => {
               >
                 <Send className="w-5 h-5" />
               </Button>
+            </div>
+            <div className="text-xs text-muted-foreground text-right">
+              {input.length} / {MAX_MESSAGE_LENGTH} characters
             </div>
           </form>
         </div>
