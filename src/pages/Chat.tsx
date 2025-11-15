@@ -6,7 +6,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
-import { Send, LogOut, Plus, Sparkles, Search, User } from "lucide-react";
+import { Send, LogOut, Plus, Sparkles, Search, User, Paperclip, Download, FileIcon, Image as ImageIcon } from "lucide-react";
 import { CodeBlock } from "@/components/CodeBlock";
 import { z } from "zod";
 
@@ -15,6 +15,10 @@ interface Message {
   role: "user" | "assistant";
   content: string;
   created_at: string;
+  file_url?: string | null;
+  file_name?: string | null;
+  file_type?: string | null;
+  file_size?: number | null;
 }
 
 interface Conversation {
@@ -40,6 +44,8 @@ const Chat = () => {
   const [input, setInput] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
   const navigate = useNavigate();
   const { toast } = useToast();
 
@@ -122,22 +128,79 @@ const Chat = () => {
     loadConversations(user.id);
   };
 
-  const sendMessage = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!user || isLoading) return;
-
-    // Validate message input
-    try {
-      const validated = messageSchema.parse({ content: input });
-      // Use validated.content for further processing
-    } catch (error) {
-      if (error instanceof z.ZodError) {
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      // Check file size (max 10MB)
+      if (file.size > 10 * 1024 * 1024) {
         toast({
-          title: "Invalid message",
-          description: error.errors[0].message,
+          title: "File too large",
+          description: "Maximum file size is 10MB",
           variant: "destructive",
         });
         return;
+      }
+      setSelectedFile(file);
+    }
+  };
+
+  const uploadFile = async (file: File, conversationId: string): Promise<{ url: string; name: string; type: string; size: number } | null> => {
+    try {
+      setIsUploading(true);
+      const fileExt = file.name.split('.').pop();
+      const fileName = `${conversationId}/${crypto.randomUUID()}.${fileExt}`;
+      
+      const { error: uploadError } = await supabase.storage
+        .from('chat-files')
+        .upload(fileName, file);
+
+      if (uploadError) throw uploadError;
+
+      return {
+        url: fileName,
+        name: file.name,
+        type: file.type,
+        size: file.size,
+      };
+    } catch (error: any) {
+      toast({
+        title: "Upload failed",
+        description: error.message,
+        variant: "destructive",
+      });
+      return null;
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  const sendMessage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user || isLoading || isUploading) return;
+
+    // Require either message or file
+    if (!input.trim() && !selectedFile) {
+      toast({
+        title: "Cannot send empty message",
+        description: "Please enter a message or attach a file",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Validate message input if provided
+    if (input.trim()) {
+      try {
+        messageSchema.parse({ content: input });
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          toast({
+            title: "Invalid message",
+            description: error.errors[0].message,
+            variant: "destructive",
+          });
+          return;
+        }
       }
     }
 
@@ -164,7 +227,21 @@ const Chat = () => {
       loadConversations(user.id);
     }
 
-    const userMessage = { role: "user" as const, content: input };
+    // Upload file if selected
+    let fileData: { url: string; name: string; type: string; size: number } | null = null;
+    if (selectedFile) {
+      fileData = await uploadFile(selectedFile, conversationId);
+      if (!fileData) return; // Upload failed
+    }
+
+    const userMessage = { 
+      role: "user" as const, 
+      content: input || (fileData ? `Sent file: ${fileData.name}` : ""),
+      file_url: fileData?.url,
+      file_name: fileData?.name,
+      file_type: fileData?.type,
+      file_size: fileData?.size,
+    };
     
     const { error: insertError } = await supabase
       .from("messages")
@@ -172,6 +249,10 @@ const Chat = () => {
         conversation_id: conversationId,
         role: userMessage.role,
         content: userMessage.content,
+        file_url: userMessage.file_url,
+        file_name: userMessage.file_name,
+        file_type: userMessage.file_type,
+        file_size: userMessage.file_size,
       });
 
     if (insertError) {
@@ -184,6 +265,7 @@ const Chat = () => {
     }
 
     setInput("");
+    setSelectedFile(null);
     setIsLoading(true);
 
     await loadMessages(conversationId);
@@ -332,6 +414,74 @@ const Chat = () => {
     return parts.length > 0 ? parts : <span className="whitespace-pre-wrap">{content}</span>;
   };
 
+  const downloadFile = async (fileUrl: string, fileName: string) => {
+    try {
+      const { data, error } = await supabase.storage
+        .from('chat-files')
+        .download(fileUrl);
+
+      if (error) throw error;
+
+      const url = URL.createObjectURL(data);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (error: any) {
+      toast({
+        title: "Download failed",
+        description: error.message,
+        variant: "destructive",
+      });
+    }
+  };
+
+  const renderFileAttachment = (message: Message) => {
+    if (!message.file_url || !message.file_name) return null;
+
+    const isImage = message.file_type?.startsWith('image/');
+    const fileSize = message.file_size ? `${(message.file_size / 1024).toFixed(1)} KB` : '';
+
+    return (
+      <div className="mt-2">
+        {isImage ? (
+          <div className="relative group cursor-pointer" onClick={() => downloadFile(message.file_url!, message.file_name!)}>
+            <div className="rounded-lg overflow-hidden border border-border max-w-sm">
+              <img 
+                src={`${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/chat-files/${message.file_url}`}
+                alt={message.file_name}
+                className="w-full h-auto"
+                onError={(e) => {
+                  // Fallback if public URL doesn't work, try authenticated URL
+                  const img = e.target as HTMLImageElement;
+                  supabase.storage.from('chat-files').createSignedUrl(message.file_url!, 3600).then(({ data }) => {
+                    if (data) img.src = data.signedUrl;
+                  });
+                }}
+              />
+            </div>
+            <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center rounded-lg">
+              <Download className="w-8 h-8 text-white" />
+            </div>
+          </div>
+        ) : (
+          <button
+            onClick={() => downloadFile(message.file_url!, message.file_name!)}
+            className="flex items-center gap-3 p-3 rounded-lg border border-border bg-secondary/50 hover:bg-secondary transition-colors"
+          >
+            <FileIcon className="w-8 h-8 text-muted-foreground flex-shrink-0" />
+            <div className="flex-1 text-left min-w-0">
+              <p className="text-sm font-medium truncate">{message.file_name}</p>
+              {fileSize && <p className="text-xs text-muted-foreground">{fileSize}</p>}
+            </div>
+            <Download className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+          </button>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div className="flex h-screen bg-background">
       {/* Sidebar */}
@@ -452,7 +602,10 @@ const Chat = () => {
                     {message.role === "assistant" ? (
                       <div>{renderMessageContent(message.content)}</div>
                     ) : (
-                      <p className="whitespace-pre-wrap">{message.content}</p>
+                      <>
+                        {message.content && <p className="whitespace-pre-wrap">{message.content}</p>}
+                        {renderFileAttachment(message)}
+                      </>
                     )}
                   </div>
                 </div>
@@ -463,7 +616,40 @@ const Chat = () => {
 
         <div className="p-4 border-t border-border bg-card">
           <form onSubmit={sendMessage} className="max-w-3xl mx-auto space-y-2">
+            {selectedFile && (
+              <div className="flex items-center gap-2 p-2 bg-secondary rounded-lg">
+                <FileIcon className="w-4 h-4 text-muted-foreground" />
+                <span className="text-sm flex-1 truncate">{selectedFile.name}</span>
+                <span className="text-xs text-muted-foreground">{(selectedFile.size / 1024).toFixed(1)} KB</span>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setSelectedFile(null)}
+                  className="h-6 w-6 p-0"
+                >
+                  ×
+                </Button>
+              </div>
+            )}
             <div className="flex gap-2">
+              <input
+                type="file"
+                id="file-upload"
+                className="hidden"
+                onChange={handleFileSelect}
+                accept="*/*"
+              />
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                onClick={() => document.getElementById('file-upload')?.click()}
+                disabled={isLoading || isUploading}
+                className="h-[60px] w-[60px] flex-shrink-0"
+              >
+                <Paperclip className="w-5 h-5" />
+              </Button>
               <Textarea
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
@@ -479,10 +665,14 @@ const Chat = () => {
               />
               <Button
                 type="submit"
-                disabled={isLoading || !input.trim()}
+                disabled={isLoading || isUploading || (!input.trim() && !selectedFile)}
                 className="bg-gradient-primary hover:opacity-90 h-[60px] px-6"
               >
-                <Send className="w-5 h-5" />
+                {isUploading ? (
+                  <span className="text-xs">Uploading...</span>
+                ) : (
+                  <Send className="w-5 h-5" />
+                )}
               </Button>
             </div>
             <div className="text-xs text-muted-foreground text-right">
