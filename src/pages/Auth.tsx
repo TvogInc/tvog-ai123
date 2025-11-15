@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import { Sparkles, Mail, Lock } from "lucide-react";
+import { Icons } from "@/components/ui/icons";
 
 const Auth = () => {
   const [email, setEmail] = useState("");
@@ -68,6 +69,27 @@ const Auth = () => {
         variant: "destructive",
       });
     } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleGoogleAuth = async () => {
+    setLoading(true);
+    try {
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: `${window.location.origin}/`,
+        },
+      });
+
+      if (error) throw error;
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message,
+        variant: "destructive",
+      });
       setLoading(false);
     }
   };
@@ -152,7 +174,27 @@ const Auth = () => {
           </Button>
         </form>
 
-        <div className="text-center space-y-3">
+        <div className="relative my-6">
+          <div className="absolute inset-0 flex items-center">
+            <span className="w-full border-t border-border" />
+          </div>
+          <div className="relative flex justify-center text-xs uppercase">
+            <span className="bg-card px-2 text-muted-foreground">Or continue with</span>
+          </div>
+        </div>
+
+        <Button
+          onClick={handleGoogleAuth}
+          variant="outline"
+          className="w-full"
+          disabled={loading}
+          type="button"
+        >
+          <Icons.google className="mr-2 h-4 w-4" />
+          Google
+        </Button>
+
+        <div className="text-center space-y-3 mt-4">
           <button
             type="button"
             onClick={() => setIsSignUp(!isSignUp)}
