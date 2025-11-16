@@ -6,14 +6,17 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
-import { Sparkles, Mail, Lock } from "lucide-react";
+import { Sparkles, Mail, Lock, AlertCircle } from "lucide-react";
 import { Icons } from "@/components/ui/icons";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 
 const Auth = () => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isSignUp, setIsSignUp] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [showVerificationPrompt, setShowVerificationPrompt] = useState(false);
+  const [unverifiedEmail, setUnverifiedEmail] = useState("");
   const navigate = useNavigate();
   const { toast } = useToast();
 
@@ -49,18 +52,29 @@ const Auth = () => {
         });
         setIsSignUp(false);
       } else {
-        const { error } = await supabase.auth.signInWithPassword({
+        const { data, error } = await supabase.auth.signInWithPassword({
           email,
           password,
         });
 
         if (error) throw error;
 
-        toast({
-          title: "Welcome back!",
-          description: "Signed in successfully.",
-        });
-        navigate("/");
+        // Check if email is verified
+        if (data.user && !data.user.email_confirmed_at) {
+          setUnverifiedEmail(email);
+          setShowVerificationPrompt(true);
+          toast({
+            title: "Email not verified",
+            description: "Please verify your email to continue.",
+            variant: "destructive",
+          });
+        } else {
+          toast({
+            title: "Welcome back!",
+            description: "Signed in successfully.",
+          });
+          navigate("/");
+        }
       }
     } catch (error: any) {
       toast({
@@ -139,6 +153,34 @@ const Auth = () => {
     }
   };
 
+  const handleResendVerification = async () => {
+    setLoading(true);
+    try {
+      const { error } = await supabase.auth.resend({
+        type: 'signup',
+        email: unverifiedEmail,
+        options: {
+          emailRedirectTo: `${window.location.origin}/`,
+        },
+      });
+
+      if (error) throw error;
+
+      toast({
+        title: "Verification email sent",
+        description: "Please check your inbox and spam folder.",
+      });
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-bg">
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,rgba(20,184,166,0.1),transparent_50%)]" />
@@ -153,6 +195,25 @@ const Auth = () => {
             {isSignUp ? "Create your account" : "Welcome back"}
           </p>
         </div>
+
+        {showVerificationPrompt && (
+          <Alert variant="destructive">
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription className="flex items-center justify-between">
+              <span className="text-sm">Your email is not verified.</span>
+              <Button
+                onClick={handleResendVerification}
+                variant="outline"
+                size="sm"
+                disabled={loading}
+                type="button"
+                className="ml-2"
+              >
+                Resend Email
+              </Button>
+            </AlertDescription>
+          </Alert>
+        )}
 
         <form onSubmit={handleAuth} className="space-y-4">
           <div className="space-y-2">
