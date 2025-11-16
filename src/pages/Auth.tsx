@@ -9,6 +9,8 @@ import { useToast } from "@/hooks/use-toast";
 import { Sparkles, Mail, Lock, AlertCircle } from "lucide-react";
 import { Icons } from "@/components/ui/icons";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Checkbox } from "@/components/ui/checkbox";
+import { PasswordStrengthIndicator } from "@/components/PasswordStrengthIndicator";
 
 const Auth = () => {
   const [email, setEmail] = useState("");
@@ -17,6 +19,7 @@ const Auth = () => {
   const [loading, setLoading] = useState(false);
   const [showVerificationPrompt, setShowVerificationPrompt] = useState(false);
   const [unverifiedEmail, setUnverifiedEmail] = useState("");
+  const [rememberMe, setRememberMe] = useState(true);
   const navigate = useNavigate();
   const { toast } = useToast();
 
@@ -69,10 +72,31 @@ const Auth = () => {
             variant: "destructive",
           });
         } else {
-          toast({
-            title: "Welcome back!",
-            description: "Signed in successfully.",
-          });
+          // Check if account was scheduled for deletion and cancel it
+          if (data.user) {
+            const { data: profile } = await supabase
+              .from("profiles")
+              .select("deletion_scheduled_at")
+              .eq("id", data.user.id)
+              .single();
+
+            if (profile?.deletion_scheduled_at) {
+              await supabase
+                .from("profiles")
+                .update({ deletion_scheduled_at: null })
+                .eq("id", data.user.id);
+
+              toast({
+                title: "Account deletion cancelled",
+                description: "Your scheduled account deletion has been cancelled. Welcome back!",
+              });
+            } else {
+              toast({
+                title: "Welcome back!",
+                description: "Signed in successfully.",
+              });
+            }
+          }
           navigate("/");
         }
       }
@@ -246,6 +270,22 @@ const Auth = () => {
                 required
               />
             </div>
+          </div>
+
+          {isSignUp && <PasswordStrengthIndicator password={password} />}
+
+          <div className="flex items-center space-x-2">
+            <Checkbox
+              id="rememberMe"
+              checked={rememberMe}
+              onCheckedChange={(checked) => setRememberMe(checked as boolean)}
+            />
+            <label
+              htmlFor="rememberMe"
+              className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer"
+            >
+              Remember me for 30 days
+            </label>
           </div>
 
           <Button

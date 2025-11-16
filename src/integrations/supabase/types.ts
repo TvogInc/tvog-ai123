@@ -86,6 +86,7 @@ export type Database = {
         Row: {
           avatar_url: string | null
           created_at: string
+          deletion_scheduled_at: string | null
           display_name: string | null
           id: string
           updated_at: string
@@ -93,6 +94,7 @@ export type Database = {
         Insert: {
           avatar_url?: string | null
           created_at?: string
+          deletion_scheduled_at?: string | null
           display_name?: string | null
           id: string
           updated_at?: string
@@ -100,6 +102,7 @@ export type Database = {
         Update: {
           avatar_url?: string | null
           created_at?: string
+          deletion_scheduled_at?: string | null
           display_name?: string | null
           id?: string
           updated_at?: string
@@ -111,7 +114,7 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      delete_expired_accounts: { Args: never; Returns: undefined }
     }
     Enums: {
       [_ in never]: never

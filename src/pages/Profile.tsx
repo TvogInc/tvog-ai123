@@ -6,8 +6,20 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, User, Lock, Sparkles } from "lucide-react";
+import { ArrowLeft, User, Lock, Sparkles, AlertTriangle } from "lucide-react";
 import { z } from "zod";
+import { PasswordStrengthIndicator } from "@/components/PasswordStrengthIndicator";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 
 const profileSchema = z.object({
   display_name: z.string().trim().min(1, "Display name cannot be empty").max(50, "Display name must be less than 50 characters"),
@@ -29,6 +41,7 @@ const Profile = () => {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [passwordLoading, setPasswordLoading] = useState(false);
+  const [deleteLoading, setDeleteLoading] = useState(false);
   const navigate = useNavigate();
   const { toast } = useToast();
 
@@ -147,6 +160,41 @@ const Profile = () => {
     }
   };
 
+  const handleAccountDeletion = async () => {
+    if (!user) return;
+
+    try {
+      setDeleteLoading(true);
+
+      // Schedule deletion by updating the profiles table
+      const { error } = await supabase
+        .from("profiles")
+        .update({
+          deletion_scheduled_at: new Date().toISOString(),
+        })
+        .eq("id", user.id);
+
+      if (error) throw error;
+
+      toast({
+        title: "Account deletion scheduled",
+        description: "Your account will be permanently deleted in 7 days. Sign in again to cancel.",
+      });
+
+      // Sign out the user
+      await supabase.auth.signOut();
+      navigate("/auth");
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setDeleteLoading(false);
+    }
+  };
+
   const isAnonymous = user?.is_anonymous;
 
   return (
@@ -236,6 +284,7 @@ const Profile = () => {
                   placeholder="Enter new password"
                   minLength={6}
                 />
+                <PasswordStrengthIndicator password={newPassword} />
               </div>
 
               <div className="space-y-2">
@@ -277,6 +326,50 @@ const Profile = () => {
             </div>
           </div>
         </Card>
+
+        {/* Delete Account Section */}
+        {!isAnonymous && (
+          <Card className="p-6 border-destructive/50 shadow-glow backdrop-blur-sm bg-card/95">
+            <div className="flex items-center gap-3 mb-4">
+              <AlertTriangle className="w-5 h-5 text-destructive" />
+              <h2 className="text-xl font-semibold">Danger Zone</h2>
+            </div>
+
+            <div className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                Once you delete your account, there is a 7-day grace period. You can cancel the deletion
+                by signing in again within this period. After 7 days, all your data will be permanently deleted.
+              </p>
+
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button variant="destructive" disabled={deleteLoading}>
+                    {deleteLoading ? "Processing..." : "Delete Account"}
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      This will schedule your account for deletion. You have 7 days to change your mind
+                      by signing in again. After 7 days, your account and all associated data will be
+                      permanently deleted and cannot be recovered.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction
+                      onClick={handleAccountDeletion}
+                      className="bg-destructive hover:bg-destructive/90"
+                    >
+                      Yes, delete my account
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            </div>
+          </Card>
+        )}
       </div>
     </div>
   );
