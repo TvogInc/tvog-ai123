@@ -94,6 +94,28 @@ const Auth = () => {
     }
   };
 
+  const handleMicrosoftAuth = async () => {
+    setLoading(true);
+    try {
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'azure',
+        options: {
+          redirectTo: `${window.location.origin}/`,
+          scopes: 'email',
+        },
+      });
+
+      if (error) throw error;
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message,
+        variant: "destructive",
+      });
+      setLoading(false);
+    }
+  };
+
   const handleGuestMode = async () => {
     setLoading(true);
     try {
@@ -183,16 +205,29 @@ const Auth = () => {
           </div>
         </div>
 
-        <Button
-          onClick={handleGoogleAuth}
-          variant="outline"
-          className="w-full"
-          disabled={loading}
-          type="button"
-        >
-          <Icons.google className="mr-2 h-4 w-4" />
-          Google
-        </Button>
+        <div className="grid grid-cols-2 gap-3">
+          <Button
+            onClick={handleGoogleAuth}
+            variant="outline"
+            className="w-full"
+            disabled={loading}
+            type="button"
+          >
+            <Icons.google className="mr-2 h-4 w-4" />
+            Google
+          </Button>
+
+          <Button
+            onClick={handleMicrosoftAuth}
+            variant="outline"
+            className="w-full"
+            disabled={loading}
+            type="button"
+          >
+            <Icons.microsoft className="mr-2 h-4 w-4" />
+            Microsoft
+          </Button>
+        </div>
 
         <div className="text-center space-y-3 mt-4">
           <button
