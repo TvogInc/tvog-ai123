@@ -6,11 +6,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
-import { Sparkles, Mail, Lock, AlertCircle } from "lucide-react";
+import { Sparkles, Mail, Lock, AlertCircle, Shield } from "lucide-react";
 import { Icons } from "@/components/ui/icons";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Checkbox } from "@/components/ui/checkbox";
 import { PasswordStrengthIndicator } from "@/components/PasswordStrengthIndicator";
+import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp";
 
 const Auth = () => {
   const [email, setEmail] = useState("");
@@ -20,6 +21,8 @@ const Auth = () => {
   const [showVerificationPrompt, setShowVerificationPrompt] = useState(false);
   const [unverifiedEmail, setUnverifiedEmail] = useState("");
   const [rememberMe, setRememberMe] = useState(true);
+  const [show2FA, setShow2FA] = useState(false);
+  const [twoFactorCode, setTwoFactorCode] = useState("");
   const navigate = useNavigate();
   const { toast } = useToast();
 
@@ -60,7 +63,14 @@ const Auth = () => {
           password,
         });
 
-        if (error) throw error;
+        if (error) {
+          // Check if 2FA is required
+          if (error.message.includes("MFA") || error.message.includes("factor")) {
+            setShow2FA(true);
+            return;
+          }
+          throw error;
+        }
 
         // Check if email is verified
         if (data.user && !data.user.email_confirmed_at) {
@@ -132,28 +142,6 @@ const Auth = () => {
     }
   };
 
-  const handleMicrosoftAuth = async () => {
-    setLoading(true);
-    try {
-      const { error } = await supabase.auth.signInWithOAuth({
-        provider: 'azure',
-        options: {
-          redirectTo: `${window.location.origin}/`,
-          scopes: 'email',
-        },
-      });
-
-      if (error) throw error;
-    } catch (error: any) {
-      toast({
-        title: "Error",
-        description: error.message,
-        variant: "destructive",
-      });
-      setLoading(false);
-    }
-  };
-
   const handleGuestMode = async () => {
     setLoading(true);
     try {
@@ -205,6 +193,49 @@ const Auth = () => {
     }
   };
 
+  const handleVerify2FA = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+
+    try {
+      const factors = await supabase.auth.mfa.listFactors();
+      if (factors.error) throw factors.error;
+
+      const totpFactor = factors.data?.totp?.[0];
+      if (!totpFactor) {
+        throw new Error("No 2FA configured for this account");
+      }
+
+      const challenge = await supabase.auth.mfa.challenge({
+        factorId: totpFactor.id,
+      });
+
+      if (challenge.error) throw challenge.error;
+
+      const verify = await supabase.auth.mfa.verify({
+        factorId: totpFactor.id,
+        challengeId: challenge.data.id,
+        code: twoFactorCode,
+      });
+
+      if (verify.error) throw verify.error;
+
+      toast({
+        title: "Success",
+        description: "Successfully verified 2FA",
+      });
+      navigate("/");
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-bg">
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,rgba(20,184,166,0.1),transparent_50%)]" />
@@ -239,7 +270,57 @@ const Auth = () => {
           </Alert>
         )}
 
-        <form onSubmit={handleAuth} className="space-y-4">
+        {show2FA ? (
+          <form onSubmit={handleVerify2FA} className="space-y-4">
+            <div className="text-center space-y-4">
+              <Shield className="w-12 h-12 mx-auto text-primary" />
+              <div>
+                <h2 className="text-xl font-semibold">Two-Factor Authentication</h2>
+                <p className="text-sm text-muted-foreground mt-2">
+                  Enter the 6-digit code from your authenticator app
+                </p>
+              </div>
+            </div>
+
+            <div className="flex justify-center">
+              <InputOTP
+                maxLength={6}
+                value={twoFactorCode}
+                onChange={(value) => setTwoFactorCode(value)}
+              >
+                <InputOTPGroup>
+                  <InputOTPSlot index={0} />
+                  <InputOTPSlot index={1} />
+                  <InputOTPSlot index={2} />
+                  <InputOTPSlot index={3} />
+                  <InputOTPSlot index={4} />
+                  <InputOTPSlot index={5} />
+                </InputOTPGroup>
+              </InputOTP>
+            </div>
+
+            <Button
+              type="submit"
+              className="w-full bg-gradient-primary hover:opacity-90 transition-opacity"
+              disabled={loading || twoFactorCode.length !== 6}
+            >
+              {loading ? "Verifying..." : "Verify"}
+            </Button>
+
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full"
+              onClick={() => {
+                setShow2FA(false);
+                setTwoFactorCode("");
+              }}
+            >
+              Back to Login
+            </Button>
+          </form>
+        ) : (
+          <form onSubmit={handleAuth} className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="email">Email</Label>
             <div className="relative">
@@ -288,14 +369,15 @@ const Auth = () => {
             </label>
           </div>
 
-          <Button
-            type="submit"
-            className="w-full bg-gradient-primary hover:opacity-90 transition-opacity"
-            disabled={loading}
-          >
-            {loading ? "Loading..." : isSignUp ? "Sign Up" : "Sign In"}
-          </Button>
-        </form>
+            <Button
+              type="submit"
+              className="w-full bg-gradient-primary hover:opacity-90 transition-opacity"
+              disabled={loading}
+            >
+              {loading ? "Loading..." : isSignUp ? "Sign Up" : "Sign In"}
+            </Button>
+          </form>
+        )}
 
         <div className="relative my-6">
           <div className="absolute inset-0 flex items-center">
@@ -306,29 +388,16 @@ const Auth = () => {
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
-          <Button
-            onClick={handleGoogleAuth}
-            variant="outline"
-            className="w-full"
-            disabled={loading}
-            type="button"
-          >
-            <Icons.google className="mr-2 h-4 w-4" />
-            Google
-          </Button>
-
-          <Button
-            onClick={handleMicrosoftAuth}
-            variant="outline"
-            className="w-full"
-            disabled={loading}
-            type="button"
-          >
-            <Icons.microsoft className="mr-2 h-4 w-4" />
-            Microsoft
-          </Button>
-        </div>
+        <Button
+          onClick={handleGoogleAuth}
+          variant="outline"
+          className="w-full"
+          disabled={loading}
+          type="button"
+        >
+          <Icons.google className="mr-2 h-4 w-4" />
+          Continue with Google
+        </Button>
 
         <div className="text-center space-y-3 mt-4">
           <button
