@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, User, Lock, Sparkles, AlertTriangle } from "lucide-react";
+import { ArrowLeft, User, Lock, Sparkles, AlertTriangle, Shield, QrCode } from "lucide-react";
 import { z } from "zod";
 import { PasswordStrengthIndicator } from "@/components/PasswordStrengthIndicator";
 import {
@@ -20,6 +20,8 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import QRCode from "qrcode";
+import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp";
 
 const profileSchema = z.object({
   display_name: z.string().trim().min(1, "Display name cannot be empty").max(50, "Display name must be less than 50 characters"),
@@ -42,6 +44,11 @@ const Profile = () => {
   const [loading, setLoading] = useState(false);
   const [passwordLoading, setPasswordLoading] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
+  const [twoFactorEnabled, setTwoFactorEnabled] = useState(false);
+  const [showQRCode, setShowQRCode] = useState(false);
+  const [qrCodeUrl, setQrCodeUrl] = useState("");
+  const [totpSecret, setTotpSecret] = useState("");
+  const [verificationCode, setVerificationCode] = useState("");
   const navigate = useNavigate();
   const { toast } = useToast();
 
@@ -54,10 +61,21 @@ const Profile = () => {
       }
       setUser(session.user);
       loadProfile(session.user.id);
+      checkTwoFactorStatus();
     };
 
     checkAuth();
   }, [navigate]);
+
+  const checkTwoFactorStatus = async () => {
+    try {
+      const { data, error } = await supabase.auth.mfa.listFactors();
+      if (error) throw error;
+      setTwoFactorEnabled(data?.totp?.length > 0);
+    } catch (error) {
+      console.error("Error checking 2FA status:", error);
+    }
+  };
 
   const loadProfile = async (userId: string) => {
     const { data, error } = await supabase
@@ -180,6 +198,116 @@ const Profile = () => {
         title: "Account deletion scheduled",
         description: "Your account will be permanently deleted in 7 days. Sign in again to cancel.",
       });
+
+      await supabase.auth.signOut();
+      navigate("/auth");
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setDeleteLoading(false);
+    }
+  };
+
+  const handleEnable2FA = async () => {
+    setLoading(true);
+    try {
+      const { data, error } = await supabase.auth.mfa.enroll({
+        factorType: 'totp',
+      });
+
+      if (error) throw error;
+
+      setTotpSecret(data.totp.secret);
+      const qrCode = await QRCode.toDataURL(data.totp.uri);
+      setQrCodeUrl(qrCode);
+      setShowQRCode(true);
+
+      toast({
+        title: "Scan QR Code",
+        description: "Use your authenticator app to scan the QR code.",
+      });
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleVerify2FA = async () => {
+    setLoading(true);
+    try {
+      const factors = await supabase.auth.mfa.listFactors();
+      if (factors.error) throw factors.error;
+
+      const totpFactor = factors.data?.totp?.[0];
+      if (!totpFactor) throw new Error("No TOTP factor found");
+
+      const challenge = await supabase.auth.mfa.challenge({ factorId: totpFactor.id });
+      if (challenge.error) throw challenge.error;
+
+      const { error } = await supabase.auth.mfa.verify({
+        factorId: totpFactor.id,
+        challengeId: challenge.data.id,
+        code: verificationCode,
+      });
+
+      if (error) throw error;
+
+      setTwoFactorEnabled(true);
+      setShowQRCode(false);
+      setVerificationCode("");
+
+      toast({
+        title: "2FA Enabled",
+        description: "Two-factor authentication has been successfully enabled.",
+      });
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDisable2FA = async () => {
+    setLoading(true);
+    try {
+      const factors = await supabase.auth.mfa.listFactors();
+      if (factors.error) throw factors.error;
+
+      const totpFactor = factors.data?.totp?.[0];
+      if (!totpFactor) throw new Error("No TOTP factor found");
+
+      const { error } = await supabase.auth.mfa.unenroll({ factorId: totpFactor.id });
+      if (error) throw error;
+
+      setTwoFactorEnabled(false);
+
+      toast({
+        title: "2FA Disabled",
+        description: "Two-factor authentication has been disabled.",
+      });
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
 
       // Sign out the user
       await supabase.auth.signOut();

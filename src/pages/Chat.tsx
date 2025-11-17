@@ -6,9 +6,10 @@ import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
-import { Send, LogOut, Plus, Sparkles, Search, User, Paperclip, Download, FileIcon, Image as ImageIcon } from "lucide-react";
+import { Send, LogOut, Plus, Sparkles, Search, User, Paperclip, Download, FileIcon, Image as ImageIcon, Wand2 } from "lucide-react";
 import { CodeBlock } from "@/components/CodeBlock";
 import { z } from "zod";
+import ThinkingAnimation from "@/components/ThinkingAnimation";
 
 interface Message {
   id: string;
@@ -46,6 +47,7 @@ const Chat = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [isGeneratingImage, setIsGeneratingImage] = useState(false);
   const navigate = useNavigate();
   const { toast } = useToast();
 
