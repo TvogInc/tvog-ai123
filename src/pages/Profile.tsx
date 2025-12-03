@@ -309,20 +309,6 @@ const Profile = () => {
     }
   };
 
-      // Sign out the user
-      await supabase.auth.signOut();
-      navigate("/auth");
-    } catch (error: any) {
-      toast({
-        title: "Error",
-        description: error.message,
-        variant: "destructive",
-      });
-    } finally {
-      setDeleteLoading(false);
-    }
-  };
-
   const isAnonymous = user?.is_anonymous;
 
   return (
@@ -435,6 +421,99 @@ const Profile = () => {
                 {passwordLoading ? "Changing..." : "Change Password"}
               </Button>
             </form>
+          </Card>
+        )}
+
+        {/* Two-Factor Authentication */}
+        {!isAnonymous && (
+          <Card className="p-6 space-y-4 border-border/50 shadow-glow backdrop-blur-sm bg-card/95">
+            <div className="flex items-center gap-3 mb-4">
+              <Shield className="w-5 h-5 text-primary" />
+              <h2 className="text-xl font-semibold">Two-Factor Authentication</h2>
+            </div>
+
+            {!showQRCode ? (
+              <div className="space-y-4">
+                <p className="text-sm text-muted-foreground">
+                  {twoFactorEnabled
+                    ? "Two-factor authentication is currently enabled on your account."
+                    : "Add an extra layer of security to your account by enabling two-factor authentication."}
+                </p>
+                
+                {twoFactorEnabled ? (
+                  <Button
+                    variant="destructive"
+                    onClick={handleDisable2FA}
+                    disabled={loading}
+                  >
+                    {loading ? "Disabling..." : "Disable 2FA"}
+                  </Button>
+                ) : (
+                  <Button
+                    onClick={handleEnable2FA}
+                    disabled={loading}
+                    className="bg-gradient-primary hover:opacity-90"
+                  >
+                    <QrCode className="w-4 h-4 mr-2" />
+                    {loading ? "Setting up..." : "Enable 2FA"}
+                  </Button>
+                )}
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <p className="text-sm text-muted-foreground">
+                  Scan this QR code with your authenticator app (Google Authenticator, Authy, etc.)
+                </p>
+                
+                <div className="flex justify-center p-4 bg-white rounded-lg">
+                  <img src={qrCodeUrl} alt="2FA QR Code" className="w-48 h-48" />
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Manual Entry Code</Label>
+                  <code className="block p-2 bg-muted rounded text-xs break-all">
+                    {totpSecret}
+                  </code>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Enter verification code</Label>
+                  <InputOTP
+                    maxLength={6}
+                    value={verificationCode}
+                    onChange={setVerificationCode}
+                  >
+                    <InputOTPGroup>
+                      <InputOTPSlot index={0} />
+                      <InputOTPSlot index={1} />
+                      <InputOTPSlot index={2} />
+                      <InputOTPSlot index={3} />
+                      <InputOTPSlot index={4} />
+                      <InputOTPSlot index={5} />
+                    </InputOTPGroup>
+                  </InputOTP>
+                </div>
+
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setShowQRCode(false);
+                      setVerificationCode("");
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    onClick={handleVerify2FA}
+                    disabled={loading || verificationCode.length !== 6}
+                    className="bg-gradient-primary hover:opacity-90"
+                  >
+                    {loading ? "Verifying..." : "Verify & Enable"}
+                  </Button>
+                </div>
+              </div>
+            )}
           </Card>
         )}
 
