@@ -6,10 +6,11 @@ import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
-import { Send, LogOut, Plus, Sparkles, Search, User, Paperclip, Download, FileIcon, Image as ImageIcon, Wand2 } from "lucide-react";
+import { Send, LogOut, Plus, Sparkles, Search, User, Paperclip, Download, FileIcon, Image as ImageIcon, Wand2, Mic, MicOff, FileSearch } from "lucide-react";
 import { CodeBlock } from "@/components/CodeBlock";
 import { z } from "zod";
 import ThinkingAnimation from "@/components/ThinkingAnimation";
+import { useVoiceInput } from "@/hooks/useVoiceInput";
 
 interface Message {
   id: string;
@@ -48,8 +49,22 @@ const Chat = () => {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [isGeneratingImage, setIsGeneratingImage] = useState(false);
+  const [isAnalyzingFile, setIsAnalyzingFile] = useState(false);
   const navigate = useNavigate();
   const { toast } = useToast();
+
+  const { isListening, isSupported: voiceSupported, toggleListening } = useVoiceInput({
+    onTranscript: (transcript) => {
+      setInput((prev) => prev + (prev ? ' ' : '') + transcript);
+    },
+    onError: (error) => {
+      toast({
+        title: "Voice Input Error",
+        description: error,
+        variant: "destructive",
+      });
+    },
+  });
 
   useEffect(() => {
     const checkAuth = async () => {
@@ -439,6 +454,69 @@ const Chat = () => {
     }
   };
 
+  const analyzeFile = async (message: Message) => {
+    if (!message.file_url || !currentConversation) return;
+    
+    setIsAnalyzingFile(true);
+    
+    try {
+      // Get the signed URL for the file
+      const { data: signedUrlData } = await supabase.storage
+        .from('chat-files')
+        .createSignedUrl(message.file_url, 3600);
+
+      if (!signedUrlData?.signedUrl) {
+        throw new Error("Could not get file URL");
+      }
+
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/analyze-file`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+          },
+          body: JSON.stringify({
+            fileUrl: signedUrlData.signedUrl,
+            fileType: message.file_type,
+            fileName: message.file_name,
+            prompt: `Analyze this ${message.file_type?.startsWith('image/') ? 'image' : 'file'} and provide detailed insights.`
+          }),
+        }
+      );
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Failed to analyze file");
+      }
+
+      const { analysis } = await response.json();
+
+      // Save analysis as assistant message
+      await supabase.from("messages").insert({
+        conversation_id: currentConversation,
+        role: "assistant",
+        content: `**File Analysis: ${message.file_name}**\n\n${analysis}`,
+      });
+
+      await loadMessages(currentConversation);
+
+      toast({
+        title: "Analysis Complete",
+        description: "File has been analyzed successfully.",
+      });
+    } catch (error: any) {
+      toast({
+        title: "Analysis Failed",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setIsAnalyzingFile(false);
+    }
+  };
+
   const renderFileAttachment = (message: Message) => {
     if (!message.file_url || !message.file_name) return null;
 
@@ -448,37 +526,60 @@ const Chat = () => {
     return (
       <div className="mt-2">
         {isImage ? (
-          <div className="relative group cursor-pointer" onClick={() => downloadFile(message.file_url!, message.file_name!)}>
-            <div className="rounded-lg overflow-hidden border border-border max-w-sm">
-              <img 
-                src={`${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/chat-files/${message.file_url}`}
-                alt={message.file_name}
-                className="w-full h-auto"
-                onError={(e) => {
-                  // Fallback if public URL doesn't work, try authenticated URL
-                  const img = e.target as HTMLImageElement;
-                  supabase.storage.from('chat-files').createSignedUrl(message.file_url!, 3600).then(({ data }) => {
-                    if (data) img.src = data.signedUrl;
-                  });
-                }}
-              />
+          <div className="space-y-2">
+            <div className="relative group cursor-pointer" onClick={() => downloadFile(message.file_url!, message.file_name!)}>
+              <div className="rounded-lg overflow-hidden border border-border max-w-sm">
+                <img 
+                  src={`${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/chat-files/${message.file_url}`}
+                  alt={message.file_name}
+                  className="w-full h-auto"
+                  onError={(e) => {
+                    const img = e.target as HTMLImageElement;
+                    supabase.storage.from('chat-files').createSignedUrl(message.file_url!, 3600).then(({ data }) => {
+                      if (data) img.src = data.signedUrl;
+                    });
+                  }}
+                />
+              </div>
+              <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center rounded-lg">
+                <Download className="w-8 h-8 text-white" />
+              </div>
             </div>
-            <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center rounded-lg">
-              <Download className="w-8 h-8 text-white" />
-            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => analyzeFile(message)}
+              disabled={isAnalyzingFile}
+              className="text-xs"
+            >
+              <FileSearch className="w-3 h-3 mr-1" />
+              {isAnalyzingFile ? "Analyzing..." : "Analyze Image"}
+            </Button>
           </div>
         ) : (
-          <button
-            onClick={() => downloadFile(message.file_url!, message.file_name!)}
-            className="flex items-center gap-3 p-3 rounded-lg border border-border bg-secondary/50 hover:bg-secondary transition-colors"
-          >
-            <FileIcon className="w-8 h-8 text-muted-foreground flex-shrink-0" />
-            <div className="flex-1 text-left min-w-0">
-              <p className="text-sm font-medium truncate">{message.file_name}</p>
-              {fileSize && <p className="text-xs text-muted-foreground">{fileSize}</p>}
-            </div>
-            <Download className="w-4 h-4 text-muted-foreground flex-shrink-0" />
-          </button>
+          <div className="space-y-2">
+            <button
+              onClick={() => downloadFile(message.file_url!, message.file_name!)}
+              className="flex items-center gap-3 p-3 rounded-lg border border-border bg-secondary/50 hover:bg-secondary transition-colors w-full"
+            >
+              <FileIcon className="w-8 h-8 text-muted-foreground flex-shrink-0" />
+              <div className="flex-1 text-left min-w-0">
+                <p className="text-sm font-medium truncate">{message.file_name}</p>
+                {fileSize && <p className="text-xs text-muted-foreground">{fileSize}</p>}
+              </div>
+              <Download className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+            </button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => analyzeFile(message)}
+              disabled={isAnalyzingFile}
+              className="text-xs"
+            >
+              <FileSearch className="w-3 h-3 mr-1" />
+              {isAnalyzingFile ? "Analyzing..." : "Analyze File"}
+            </Button>
+          </div>
         )}
       </div>
     );
@@ -652,10 +753,23 @@ const Chat = () => {
               >
                 <Paperclip className="w-5 h-5" />
               </Button>
+              {voiceSupported && (
+                <Button
+                  type="button"
+                  variant={isListening ? "destructive" : "outline"}
+                  size="icon"
+                  onClick={toggleListening}
+                  disabled={isLoading}
+                  className={`h-[60px] w-[60px] flex-shrink-0 ${isListening ? 'animate-pulse' : ''}`}
+                  title={isListening ? "Stop listening" : "Start voice input"}
+                >
+                  {isListening ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
+                </Button>
+              )}
               <Textarea
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
-                placeholder="Message Tvog AI..."
+                placeholder={isListening ? "Listening..." : "Message Tvog AI..."}
                 className="min-h-[60px] resize-none"
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.shiftKey) {
