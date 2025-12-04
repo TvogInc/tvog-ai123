@@ -101,7 +101,7 @@ All colors MUST be HSL.
 /* Typing cursor for streaming text */
 .typing-cursor::after {
   content: '▊';
-  animation: blink 1s step-end infinite;
+  animation: blink 1.5s step-end infinite;
   color: hsl(174 84% 42%);
   margin-left: 2px;
 }
