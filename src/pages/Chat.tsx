@@ -6,7 +6,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
-import { Send, LogOut, Plus, Sparkles, Search, User, Paperclip, Download, FileIcon, Image as ImageIcon, Wand2, Mic, MicOff, FileSearch } from "lucide-react";
+import { Send, LogOut, Plus, Sparkles, Search, User, Paperclip, Download, FileIcon, Image as ImageIcon, Wand2, Mic, MicOff, FileSearch, Pencil, X, Check } from "lucide-react";
 import { CodeBlock } from "@/components/CodeBlock";
 import { z } from "zod";
 import ThinkingAnimation from "@/components/ThinkingAnimation";
@@ -48,6 +48,8 @@ const Chat = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
+  const [editingContent, setEditingContent] = useState("");
   const [isGeneratingImage, setIsGeneratingImage] = useState(false);
   const [isAnalyzingFile, setIsAnalyzingFile] = useState(false);
   const navigate = useNavigate();
@@ -386,6 +388,149 @@ const Chat = () => {
     }
   };
 
+  const startEditingMessage = (message: Message) => {
+    setEditingMessageId(message.id);
+    setEditingContent(message.content);
+  };
+
+  const cancelEditing = () => {
+    setEditingMessageId(null);
+    setEditingContent("");
+  };
+
+  const saveEditedMessage = async (messageId: string) => {
+    if (!editingContent.trim() || !currentConversation) return;
+
+    // Update the message in database
+    const { error } = await supabase
+      .from("messages")
+      .update({ content: editingContent })
+      .eq("id", messageId);
+
+    if (error) {
+      toast({
+        title: "Error",
+        description: "Failed to update message",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Delete all messages after this one and regenerate response
+    const messageIndex = messages.findIndex(m => m.id === messageId);
+    const messagesToDelete = messages.slice(messageIndex + 1);
+    
+    if (messagesToDelete.length > 0) {
+      await supabase
+        .from("messages")
+        .delete()
+        .in("id", messagesToDelete.map(m => m.id));
+    }
+
+    // Update local state
+    setMessages(prev => prev.slice(0, messageIndex + 1).map(m => 
+      m.id === messageId ? { ...m, content: editingContent } : m
+    ));
+    
+    setEditingMessageId(null);
+    setEditingContent("");
+
+    // Regenerate AI response
+    setIsLoading(true);
+    try {
+      const allMessages = messages.slice(0, messageIndex + 1).map(m => 
+        m.id === messageId ? { ...m, content: editingContent } : m
+      );
+      
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/chat`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+          },
+          body: JSON.stringify({ messages: allMessages }),
+        }
+      );
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Failed to get response");
+      }
+
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+      let assistantMessage = "";
+
+      if (!reader) throw new Error("No response stream");
+
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+
+        let newlineIndex: number;
+        while ((newlineIndex = buffer.indexOf("\n")) !== -1) {
+          let line = buffer.slice(0, newlineIndex);
+          buffer = buffer.slice(newlineIndex + 1);
+
+          if (line.endsWith("\r")) line = line.slice(0, -1);
+          if (line.startsWith(":") || line.trim() === "") continue;
+          if (!line.startsWith("data: ")) continue;
+
+          const jsonStr = line.slice(6).trim();
+          if (jsonStr === "[DONE]") break;
+
+          try {
+            const parsed = JSON.parse(jsonStr);
+            const content = parsed.choices?.[0]?.delta?.content;
+            if (content) {
+              assistantMessage += content;
+              setMessages((prev) => {
+                const last = prev[prev.length - 1];
+                if (last?.role === "assistant") {
+                  return prev.map((m, i) =>
+                    i === prev.length - 1 ? { ...m, content: assistantMessage } : m
+                  );
+                }
+                return [
+                  ...prev,
+                  {
+                    id: crypto.randomUUID(),
+                    role: "assistant",
+                    content: assistantMessage,
+                    created_at: new Date().toISOString(),
+                  },
+                ];
+              });
+            }
+          } catch (e) {
+            buffer = line + "\n" + buffer;
+            break;
+          }
+        }
+      }
+
+      await supabase.from("messages").insert({
+        conversation_id: currentConversation,
+        role: "assistant",
+        content: assistantMessage,
+      });
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const handleSignOut = async () => {
     await supabase.auth.signOut();
     navigate("/auth");
@@ -710,11 +855,51 @@ const Chat = () => {
                         <div className={isStreaming ? "typing-cursor" : ""}>
                           {renderMessageContent(message.content)}
                         </div>
+                      ) : editingMessageId === message.id ? (
+                        <div className="space-y-2">
+                          <Textarea
+                            value={editingContent}
+                            onChange={(e) => setEditingContent(e.target.value)}
+                            className="min-h-[60px] bg-primary-foreground/10 border-primary-foreground/20 text-primary-foreground placeholder:text-primary-foreground/50"
+                            autoFocus
+                          />
+                          <div className="flex gap-2 justify-end">
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="ghost"
+                              onClick={cancelEditing}
+                              className="h-7 px-2 text-primary-foreground/80 hover:text-primary-foreground hover:bg-primary-foreground/10"
+                            >
+                              <X className="w-3 h-3 mr-1" />
+                              Cancel
+                            </Button>
+                            <Button
+                              type="button"
+                              size="sm"
+                              onClick={() => saveEditedMessage(message.id)}
+                              disabled={!editingContent.trim() || isLoading}
+                              className="h-7 px-2 bg-primary-foreground text-primary hover:bg-primary-foreground/90"
+                            >
+                              <Check className="w-3 h-3 mr-1" />
+                              Save & Resend
+                            </Button>
+                          </div>
+                        </div>
                       ) : (
-                        <>
+                        <div className="group relative">
                           {message.content && <p className="whitespace-pre-wrap">{message.content}</p>}
                           {renderFileAttachment(message)}
-                        </>
+                          {!isLoading && (
+                            <button
+                              onClick={() => startEditingMessage(message)}
+                              className="absolute -top-2 -right-2 opacity-0 group-hover:opacity-100 transition-opacity p-1.5 rounded-full bg-primary-foreground/20 hover:bg-primary-foreground/30"
+                              title="Edit message"
+                            >
+                              <Pencil className="w-3 h-3" />
+                            </button>
+                          )}
+                        </div>
                       )}
                     </div>
                   </div>
