@@ -49,6 +49,7 @@ const Profile = () => {
   const [qrCodeUrl, setQrCodeUrl] = useState("");
   const [totpSecret, setTotpSecret] = useState("");
   const [verificationCode, setVerificationCode] = useState("");
+  const [pendingFactorId, setPendingFactorId] = useState<string | null>(null);
   const navigate = useNavigate();
   const { toast } = useToast();
 
@@ -221,6 +222,8 @@ const Profile = () => {
 
       if (error) throw error;
 
+      // Store the factor ID for verification
+      setPendingFactorId(data.id);
       setTotpSecret(data.totp.secret);
       const qrCode = await QRCode.toDataURL(data.totp.uri);
       setQrCodeUrl(qrCode);
@@ -244,17 +247,15 @@ const Profile = () => {
   const handleVerify2FA = async () => {
     setLoading(true);
     try {
-      const factors = await supabase.auth.mfa.listFactors();
-      if (factors.error) throw factors.error;
+      // Use the pending factor ID from enrollment
+      const factorId = pendingFactorId;
+      if (!factorId) throw new Error("No pending 2FA setup found. Please start again.");
 
-      const totpFactor = factors.data?.totp?.[0];
-      if (!totpFactor) throw new Error("No TOTP factor found");
-
-      const challenge = await supabase.auth.mfa.challenge({ factorId: totpFactor.id });
+      const challenge = await supabase.auth.mfa.challenge({ factorId });
       if (challenge.error) throw challenge.error;
 
       const { error } = await supabase.auth.mfa.verify({
-        factorId: totpFactor.id,
+        factorId,
         challengeId: challenge.data.id,
         code: verificationCode,
       });
@@ -264,6 +265,7 @@ const Profile = () => {
       setTwoFactorEnabled(true);
       setShowQRCode(false);
       setVerificationCode("");
+      setPendingFactorId(null);
 
       toast({
         title: "2FA Enabled",
@@ -500,6 +502,7 @@ const Profile = () => {
                     onClick={() => {
                       setShowQRCode(false);
                       setVerificationCode("");
+                      setPendingFactorId(null);
                     }}
                   >
                     Cancel
