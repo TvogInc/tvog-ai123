@@ -74,14 +74,24 @@ export default {
           to: { height: "0" },
         },
         "wave": {
-          "0%, 100%": { transform: "scaleY(0.3)", opacity: "0.5" },
+          "0%, 100%": { transform: "scaleY(0.25)", opacity: "0.4" },
           "50%": { transform: "scaleY(1)", opacity: "1" },
+        },
+        "shimmer": {
+          "0%": { transform: "translateX(-100%)" },
+          "100%": { transform: "translateX(100%)" },
+        },
+        "blink": {
+          "0%, 100%": { opacity: "1" },
+          "50%": { opacity: "0" },
         },
       },
       animation: {
         "accordion-down": "accordion-down 0.2s ease-out",
         "accordion-up": "accordion-up 0.2s ease-out",
-        "wave": "wave 1s ease-in-out infinite",
+        "wave": "wave 0.8s ease-in-out infinite",
+        "shimmer": "shimmer 2s infinite",
+        "blink": "blink 1s step-end infinite",
       },
     },
   },

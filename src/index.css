@@ -58,3 +58,50 @@ All colors MUST be HSL.
     @apply bg-background text-foreground;
   }
 }
+
+/* Shimmer effects for thinking animation */
+.shimmer-effect {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    hsl(174 84% 42% / 0.4) 50%,
+    transparent 100%
+  );
+  animation: shimmer 1.5s infinite;
+}
+
+.shimmer-overlay {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    hsl(174 84% 42% / 0.15) 50%,
+    transparent 100%
+  );
+  animation: shimmer 2s infinite;
+}
+
+.shimmer-bar {
+  position: relative;
+  overflow: hidden;
+}
+
+.shimmer-bar::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    hsl(174 84% 42% / 0.3) 50%,
+    transparent 100%
+  );
+  animation: shimmer 1.5s infinite;
+}
+
+/* Typing cursor for streaming text */
+.typing-cursor::after {
+  content: '▊';
+  animation: blink 1s step-end infinite;
+  color: hsl(174 84% 42%);
+  margin-left: 2px;
+}

@@ -683,36 +683,46 @@ const Chat = () => {
             </div>
           ) : (
             <div className="space-y-4 max-w-3xl mx-auto">
-              {messages.map((message) => (
-                <div
-                  key={message.id}
-                  className={`flex gap-3 ${
-                    message.role === "user" ? "justify-end" : ""
-                  }`}
-                >
-                  {message.role === "assistant" && (
-                    <div className="w-8 h-8 rounded-lg bg-gradient-primary flex items-center justify-center flex-shrink-0">
-                      <Sparkles className="w-4 h-4 text-primary-foreground" />
-                    </div>
-                  )}
+              {messages.map((message, index) => {
+                const isLastMessage = index === messages.length - 1;
+                const isStreaming = isLoading && isLastMessage && message.role === "assistant";
+                
+                return (
                   <div
-                    className={`rounded-2xl p-4 max-w-[80%] ${
-                      message.role === "user"
-                        ? "bg-primary text-primary-foreground"
-                        : "bg-card border border-border"
+                    key={message.id}
+                    className={`flex gap-3 ${
+                      message.role === "user" ? "justify-end" : ""
                     }`}
                   >
-                    {message.role === "assistant" ? (
-                      <div>{renderMessageContent(message.content)}</div>
-                    ) : (
-                      <>
-                        {message.content && <p className="whitespace-pre-wrap">{message.content}</p>}
-                        {renderFileAttachment(message)}
-                      </>
+                    {message.role === "assistant" && (
+                      <div className="w-8 h-8 rounded-lg bg-gradient-primary flex items-center justify-center flex-shrink-0">
+                        <Sparkles className="w-4 h-4 text-primary-foreground" />
+                      </div>
                     )}
+                    <div
+                      className={`rounded-2xl p-4 max-w-[80%] ${
+                        message.role === "user"
+                          ? "bg-primary text-primary-foreground"
+                          : "bg-card border border-border"
+                      }`}
+                    >
+                      {message.role === "assistant" ? (
+                        <div className={isStreaming ? "typing-cursor" : ""}>
+                          {renderMessageContent(message.content)}
+                        </div>
+                      ) : (
+                        <>
+                          {message.content && <p className="whitespace-pre-wrap">{message.content}</p>}
+                          {renderFileAttachment(message)}
+                        </>
+                      )}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
+              {isLoading && messages[messages.length - 1]?.role !== "assistant" && (
+                <ThinkingAnimation />
+              )}
             </div>
           )}
         </ScrollArea>
