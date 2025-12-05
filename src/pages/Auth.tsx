@@ -36,6 +36,8 @@ const Auth = () => {
     checkAuth();
   }, [navigate]);
 
+  const [pendingFactorId, setPendingFactorId] = useState<string | null>(null);
+
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -64,12 +66,34 @@ const Auth = () => {
         });
 
         if (error) {
-          // Check if 2FA is required
-          if (error.message.includes("MFA") || error.message.includes("factor")) {
-            setShow2FA(true);
-            return;
+          // Check if MFA is required (AAL2 needed)
+          if (error.message.includes("MFA") || error.message.includes("factor") || error.code === "mfa_required") {
+            // Get the factors to verify
+            const { data: factorsData } = await supabase.auth.mfa.listFactors();
+            const totpFactor = factorsData?.totp?.[0];
+            if (totpFactor) {
+              setPendingFactorId(totpFactor.id);
+              setShow2FA(true);
+              setLoading(false);
+              return;
+            }
           }
           throw error;
+        }
+
+        // Check if MFA is enrolled and we need to verify
+        if (data.session) {
+          const { data: aal } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+          if (aal?.nextLevel === 'aal2' && aal?.currentLevel === 'aal1') {
+            const { data: factorsData } = await supabase.auth.mfa.listFactors();
+            const totpFactor = factorsData?.totp?.[0];
+            if (totpFactor) {
+              setPendingFactorId(totpFactor.id);
+              setShow2FA(true);
+              setLoading(false);
+              return;
+            }
+          }
         }
 
         // Check if email is verified
@@ -198,22 +222,26 @@ const Auth = () => {
     setLoading(true);
 
     try {
-      const factors = await supabase.auth.mfa.listFactors();
-      if (factors.error) throw factors.error;
-
-      const totpFactor = factors.data?.totp?.[0];
-      if (!totpFactor) {
-        throw new Error("No 2FA configured for this account");
+      const factorId = pendingFactorId;
+      if (!factorId) {
+        // Fallback to listing factors if not stored
+        const factors = await supabase.auth.mfa.listFactors();
+        if (factors.error) throw factors.error;
+        const totpFactor = factors.data?.totp?.[0];
+        if (!totpFactor) {
+          throw new Error("No 2FA configured for this account");
+        }
+        setPendingFactorId(totpFactor.id);
       }
 
       const challenge = await supabase.auth.mfa.challenge({
-        factorId: totpFactor.id,
+        factorId: factorId || pendingFactorId!,
       });
 
       if (challenge.error) throw challenge.error;
 
       const verify = await supabase.auth.mfa.verify({
-        factorId: totpFactor.id,
+        factorId: factorId || pendingFactorId!,
         challengeId: challenge.data.id,
         code: twoFactorCode,
       });
