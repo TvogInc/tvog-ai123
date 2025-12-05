@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -6,11 +6,17 @@ import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
-import { Send, LogOut, Plus, Sparkles, Search, User, Paperclip, Download, FileIcon, Image as ImageIcon, Wand2, Mic, MicOff, FileSearch, Pencil, X, Check } from "lucide-react";
+import { Send, LogOut, Plus, Sparkles, Search, User, Paperclip, Download, FileIcon, Image as ImageIcon, Wand2, Mic, MicOff, FileSearch, Pencil, X, Check, Copy, Keyboard } from "lucide-react";
 import { CodeBlock } from "@/components/CodeBlock";
 import { z } from "zod";
 import ThinkingAnimation from "@/components/ThinkingAnimation";
 import { useVoiceInput } from "@/hooks/useVoiceInput";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 interface Message {
   id: string;
@@ -52,10 +58,12 @@ const Chat = () => {
   const [editingContent, setEditingContent] = useState("");
   const [isGeneratingImage, setIsGeneratingImage] = useState(false);
   const [isAnalyzingFile, setIsAnalyzingFile] = useState(false);
+  const [showImagePrompt, setShowImagePrompt] = useState(false);
+  const [imagePrompt, setImagePrompt] = useState("");
   const navigate = useNavigate();
   const { toast } = useToast();
 
-  const { isListening, isSupported: voiceSupported, toggleListening } = useVoiceInput({
+  const { isListening, isSupported: voiceSupported, startListening, stopListening } = useVoiceInput({
     onTranscript: (transcript) => {
       setInput((prev) => prev + (prev ? ' ' : '') + transcript);
     },
@@ -66,7 +74,61 @@ const Chat = () => {
         variant: "destructive",
       });
     },
+    continuous: true,
   });
+
+  const toggleVoice = useCallback(() => {
+    if (isListening) {
+      stopListening();
+      toast({ title: "Voice input stopped" });
+    } else {
+      startListening();
+      toast({ title: "Listening...", description: "Speak now" });
+    }
+  }, [isListening, startListening, stopListening, toast]);
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Ctrl/Cmd + K: New chat
+      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+        e.preventDefault();
+        createNewConversation();
+      }
+      // Ctrl/Cmd + I: Generate image
+      if ((e.ctrlKey || e.metaKey) && e.key === 'i') {
+        e.preventDefault();
+        setShowImagePrompt(true);
+      }
+      // Ctrl/Cmd + M: Toggle voice
+      if ((e.ctrlKey || e.metaKey) && e.key === 'm' && voiceSupported) {
+        e.preventDefault();
+        toggleVoice();
+      }
+      // Escape: Cancel editing or close image prompt
+      if (e.key === 'Escape') {
+        if (editingMessageId) {
+          cancelEditing();
+        }
+        if (showImagePrompt) {
+          setShowImagePrompt(false);
+          setImagePrompt("");
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [voiceSupported, toggleVoice, editingMessageId, showImagePrompt]);
+
+  const copyToClipboard = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast({ title: "Copied to clipboard" });
+    } catch {
+      toast({ title: "Failed to copy", variant: "destructive" });
+    }
+  };
 
   useEffect(() => {
     const checkAuth = async () => {
@@ -536,14 +598,91 @@ const Chat = () => {
     navigate("/auth");
   };
 
+  const generateImage = async () => {
+    if (!imagePrompt.trim() || !user) return;
+    
+    setIsGeneratingImage(true);
+    
+    try {
+      let conversationId = currentConversation;
+      
+      // Create conversation if needed
+      if (!conversationId) {
+        const { data, error } = await supabase
+          .from("conversations")
+          .insert({ user_id: user.id, title: `Image: ${imagePrompt.slice(0, 30)}...` })
+          .select()
+          .single();
+          
+        if (error) throw error;
+        conversationId = data.id;
+        setCurrentConversation(conversationId);
+        loadConversations(user.id);
+      }
+      
+      // Save user request
+      await supabase.from("messages").insert({
+        conversation_id: conversationId,
+        role: "user",
+        content: `🎨 Generate image: ${imagePrompt}`,
+      });
+      
+      await loadMessages(conversationId);
+      
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-image`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+          },
+          body: JSON.stringify({ prompt: imagePrompt }),
+        }
+      );
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Failed to generate image");
+      }
+      
+      const { imageUrl } = await response.json();
+      
+      // Save assistant response with image
+      await supabase.from("messages").insert({
+        conversation_id: conversationId,
+        role: "assistant",
+        content: `Here's your generated image:\n\n![Generated Image](${imageUrl})\n\n**Prompt:** ${imagePrompt}`,
+      });
+      
+      await loadMessages(conversationId);
+      setShowImagePrompt(false);
+      setImagePrompt("");
+      
+      toast({
+        title: "Image Generated",
+        description: "Your image has been created successfully.",
+      });
+    } catch (error: any) {
+      toast({
+        title: "Image Generation Failed",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setIsGeneratingImage(false);
+    }
+  };
+
   const renderMessageContent = (content: string) => {
     const parts: JSX.Element[] = [];
-    const codeBlockRegex = /```(\w+)?\n([\s\S]*?)```/g;
+    // Match code blocks and images
+    const combinedRegex = /```(\w+)?\n([\s\S]*?)```|!\[([^\]]*)\]\(([^)]+)\)/g;
     let lastIndex = 0;
     let match;
 
-    while ((match = codeBlockRegex.exec(content)) !== null) {
-      // Add text before code block
+    while ((match = combinedRegex.exec(content)) !== null) {
+      // Add text before match
       if (match.index > lastIndex) {
         const textBefore = content.slice(lastIndex, match.index);
         parts.push(
@@ -553,12 +692,28 @@ const Chat = () => {
         );
       }
 
-      // Add code block
-      const language = match[1] || "code";
-      const code = match[2];
-      parts.push(
-        <CodeBlock key={`code-${match.index}`} code={code} language={language} />
-      );
+      if (match[0].startsWith('```')) {
+        // Code block
+        const language = match[1] || "code";
+        const code = match[2];
+        parts.push(
+          <CodeBlock key={`code-${match.index}`} code={code} language={language} />
+        );
+      } else {
+        // Image
+        const alt = match[3] || 'Image';
+        const src = match[4];
+        parts.push(
+          <div key={`img-${match.index}`} className="my-2">
+            <img 
+              src={src} 
+              alt={alt}
+              className="max-w-full rounded-lg border border-border"
+              loading="lazy"
+            />
+          </div>
+        );
+      }
 
       lastIndex = match.index + match[0].length;
     }
@@ -845,7 +1000,7 @@ const Chat = () => {
                       </div>
                     )}
                     <div
-                      className={`rounded-2xl p-4 max-w-[80%] ${
+                      className={`rounded-2xl p-4 max-w-[80%] group relative ${
                         message.role === "user"
                           ? "bg-primary text-primary-foreground"
                           : "bg-card border border-border"
@@ -854,6 +1009,15 @@ const Chat = () => {
                       {message.role === "assistant" ? (
                         <div className={isStreaming ? "typing-cursor" : ""}>
                           {renderMessageContent(message.content)}
+                          {!isStreaming && message.content && (
+                            <button
+                              onClick={() => copyToClipboard(message.content)}
+                              className="absolute -bottom-2 -right-2 opacity-0 group-hover:opacity-100 transition-opacity p-1.5 rounded-full bg-secondary hover:bg-secondary/80 border border-border"
+                              title="Copy response"
+                            >
+                              <Copy className="w-3 h-3" />
+                            </button>
+                          )}
                         </div>
                       ) : editingMessageId === message.id ? (
                         <div className="space-y-2">
@@ -912,6 +1076,48 @@ const Chat = () => {
           )}
         </ScrollArea>
 
+        {/* Image Generation Modal */}
+        {showImagePrompt && (
+          <div className="fixed inset-0 bg-background/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-card border border-border rounded-xl p-6 max-w-md w-full space-y-4 shadow-lg">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-lg bg-gradient-primary flex items-center justify-center">
+                  <Wand2 className="w-5 h-5 text-primary-foreground" />
+                </div>
+                <div>
+                  <h3 className="font-semibold">Generate Image</h3>
+                  <p className="text-sm text-muted-foreground">Describe the image you want to create</p>
+                </div>
+              </div>
+              <Textarea
+                value={imagePrompt}
+                onChange={(e) => setImagePrompt(e.target.value)}
+                placeholder="A futuristic city with flying cars..."
+                className="min-h-[100px]"
+                autoFocus
+              />
+              <div className="flex gap-2 justify-end">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setShowImagePrompt(false);
+                    setImagePrompt("");
+                  }}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  onClick={generateImage}
+                  disabled={!imagePrompt.trim() || isGeneratingImage}
+                  className="bg-gradient-primary"
+                >
+                  {isGeneratingImage ? "Generating..." : "Generate"}
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+
         <div className="p-4 border-t border-border bg-card">
           <form onSubmit={sendMessage} className="max-w-3xl mx-auto space-y-2">
             {selectedFile && (
@@ -948,18 +1154,41 @@ const Chat = () => {
               >
                 <Paperclip className="w-5 h-5" />
               </Button>
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon"
+                      onClick={() => setShowImagePrompt(true)}
+                      disabled={isLoading || isGeneratingImage}
+                      className="h-[60px] w-[60px] flex-shrink-0"
+                    >
+                      <Wand2 className="w-5 h-5" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Generate Image (Ctrl+I)</TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
               {voiceSupported && (
-                <Button
-                  type="button"
-                  variant={isListening ? "destructive" : "outline"}
-                  size="icon"
-                  onClick={toggleListening}
-                  disabled={isLoading}
-                  className={`h-[60px] w-[60px] flex-shrink-0 ${isListening ? 'animate-pulse' : ''}`}
-                  title={isListening ? "Stop listening" : "Start voice input"}
-                >
-                  {isListening ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
-                </Button>
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type="button"
+                        variant={isListening ? "destructive" : "outline"}
+                        size="icon"
+                        onClick={toggleVoice}
+                        disabled={isLoading}
+                        className={`h-[60px] w-[60px] flex-shrink-0 ${isListening ? 'animate-pulse' : ''}`}
+                      >
+                        {isListening ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>{isListening ? "Stop listening" : "Voice input (Ctrl+M)"}</TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
               )}
               <Textarea
                 value={input}
@@ -986,8 +1215,13 @@ const Chat = () => {
                 )}
               </Button>
             </div>
-            <div className="text-xs text-muted-foreground text-right">
-              {input.length} / {MAX_MESSAGE_LENGTH} characters
+            <div className="flex items-center justify-between text-xs text-muted-foreground">
+              <div className="flex items-center gap-4">
+                <span className="flex items-center gap-1"><Keyboard className="w-3 h-3" /> Ctrl+K: New chat</span>
+                <span>Ctrl+I: Image</span>
+                {voiceSupported && <span>Ctrl+M: Voice</span>}
+              </div>
+              <span>{input.length} / {MAX_MESSAGE_LENGTH}</span>
             </div>
           </form>
         </div>
