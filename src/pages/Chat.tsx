@@ -6,11 +6,12 @@ import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
-import { Send, LogOut, Plus, Sparkles, Search, User, Paperclip, Download, FileIcon, Image as ImageIcon, Wand2, Mic, MicOff, FileSearch, Pencil, X, Check, Copy, Keyboard } from "lucide-react";
+import { Send, LogOut, Plus, Sparkles, Search, User, Paperclip, Download, FileIcon, Image as ImageIcon, Wand2, Mic, MicOff, FileSearch, Pencil, X, Check, Copy, Keyboard, RefreshCw, ThumbsUp, ThumbsDown } from "lucide-react";
 import { CodeBlock } from "@/components/CodeBlock";
 import { z } from "zod";
 import ThinkingAnimation from "@/components/ThinkingAnimation";
 import { useVoiceInput } from "@/hooks/useVoiceInput";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import {
   Tooltip,
   TooltipContent,
@@ -60,6 +61,7 @@ const Chat = () => {
   const [isAnalyzingFile, setIsAnalyzingFile] = useState(false);
   const [showImagePrompt, setShowImagePrompt] = useState(false);
   const [imagePrompt, setImagePrompt] = useState("");
+  const [messageFeedback, setMessageFeedback] = useState<Record<string, 'up' | 'down' | null>>({});
   const navigate = useNavigate();
   const { toast } = useToast();
 
@@ -127,6 +129,145 @@ const Chat = () => {
       toast({ title: "Copied to clipboard" });
     } catch {
       toast({ title: "Failed to copy", variant: "destructive" });
+    }
+  };
+
+  const downloadImage = async (src: string, filename: string = 'generated-image.png') => {
+    try {
+      const response = await fetch(src);
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast({ title: "Image downloaded" });
+    } catch {
+      toast({ title: "Failed to download image", variant: "destructive" });
+    }
+  };
+
+  const handleFeedback = (messageId: string, feedback: 'up' | 'down') => {
+    setMessageFeedback(prev => ({
+      ...prev,
+      [messageId]: prev[messageId] === feedback ? null : feedback
+    }));
+    toast({ 
+      title: feedback === 'up' ? "Thanks for the feedback!" : "We'll try to improve",
+      description: feedback === 'up' ? "Glad this was helpful" : "Your feedback helps us get better"
+    });
+  };
+
+  const regenerateResponse = async (messageIndex: number) => {
+    if (!currentConversation || isLoading) return;
+    
+    // Find the user message before this assistant message
+    const userMessageIndex = messageIndex - 1;
+    if (userMessageIndex < 0 || messages[userMessageIndex]?.role !== 'user') return;
+    
+    const userMessage = messages[userMessageIndex];
+    
+    // Delete the current assistant message
+    const assistantMessage = messages[messageIndex];
+    await supabase.from("messages").delete().eq("id", assistantMessage.id);
+    
+    // Remove from local state
+    setMessages(prev => prev.filter((_, i) => i !== messageIndex));
+    
+    setIsLoading(true);
+    
+    try {
+      const allMessages = messages.slice(0, messageIndex);
+      
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/chat`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+          },
+          body: JSON.stringify({ messages: allMessages }),
+        }
+      );
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Failed to get response");
+      }
+
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+      let newAssistantMessage = "";
+
+      if (!reader) throw new Error("No response stream");
+
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+
+        let newlineIndex: number;
+        while ((newlineIndex = buffer.indexOf("\n")) !== -1) {
+          let line = buffer.slice(0, newlineIndex);
+          buffer = buffer.slice(newlineIndex + 1);
+
+          if (line.endsWith("\r")) line = line.slice(0, -1);
+          if (line.startsWith(":") || line.trim() === "") continue;
+          if (!line.startsWith("data: ")) continue;
+
+          const jsonStr = line.slice(6).trim();
+          if (jsonStr === "[DONE]") break;
+
+          try {
+            const parsed = JSON.parse(jsonStr);
+            const content = parsed.choices?.[0]?.delta?.content;
+            if (content) {
+              newAssistantMessage += content;
+              setMessages((prev) => {
+                const last = prev[prev.length - 1];
+                if (last?.role === "assistant") {
+                  return prev.map((m, i) =>
+                    i === prev.length - 1 ? { ...m, content: newAssistantMessage } : m
+                  );
+                }
+                return [
+                  ...prev,
+                  {
+                    id: crypto.randomUUID(),
+                    role: "assistant",
+                    content: newAssistantMessage,
+                    created_at: new Date().toISOString(),
+                  },
+                ];
+              });
+            }
+          } catch (e) {
+            buffer = line + "\n" + buffer;
+            break;
+          }
+        }
+      }
+
+      await supabase.from("messages").insert({
+        conversation_id: currentConversation,
+        role: "assistant",
+        content: newAssistantMessage,
+      });
+
+      toast({ title: "Response regenerated" });
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -704,13 +845,20 @@ const Chat = () => {
         const alt = match[3] || 'Image';
         const src = match[4];
         parts.push(
-          <div key={`img-${match.index}`} className="my-2">
+          <div key={`img-${match.index}`} className="my-2 relative group/img">
             <img 
               src={src} 
               alt={alt}
               className="max-w-full rounded-lg border border-border"
               loading="lazy"
             />
+            <button
+              onClick={() => downloadImage(src, `generated-image-${Date.now()}.png`)}
+              className="absolute top-2 right-2 opacity-0 group-hover/img:opacity-100 transition-opacity p-2 rounded-lg bg-background/80 hover:bg-background border border-border"
+              title="Download image"
+            >
+              <Download className="w-4 h-4" />
+            </button>
           </div>
         );
       }
@@ -962,11 +1110,14 @@ const Chat = () => {
       {/* Main Chat Area */}
       <div className="flex-1 flex flex-col">
         <div className="p-4 border-b border-border bg-card">
-          <div className="flex items-center gap-2">
-            <div className="w-10 h-10 rounded-xl bg-gradient-primary flex items-center justify-center shadow-glow">
-              <Sparkles className="w-5 h-5 text-primary-foreground" />
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="w-10 h-10 rounded-xl bg-gradient-primary flex items-center justify-center shadow-glow">
+                <Sparkles className="w-5 h-5 text-primary-foreground" />
+              </div>
+              <h1 className="text-xl font-bold">Tvog AI</h1>
             </div>
-            <h1 className="text-xl font-bold">Tvog AI</h1>
+            <ThemeToggle />
           </div>
         </div>
 
@@ -1010,13 +1161,62 @@ const Chat = () => {
                         <div className={isStreaming ? "typing-cursor" : ""}>
                           {renderMessageContent(message.content)}
                           {!isStreaming && message.content && (
-                            <button
-                              onClick={() => copyToClipboard(message.content)}
-                              className="absolute -bottom-2 -right-2 opacity-0 group-hover:opacity-100 transition-opacity p-1.5 rounded-full bg-secondary hover:bg-secondary/80 border border-border"
-                              title="Copy response"
-                            >
-                              <Copy className="w-3 h-3" />
-                            </button>
+                            <div className="flex items-center gap-1 mt-3 pt-3 border-t border-border opacity-0 group-hover:opacity-100 transition-opacity">
+                              <TooltipProvider>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <button
+                                      onClick={() => copyToClipboard(message.content)}
+                                      className="p-1.5 rounded-md hover:bg-secondary transition-colors"
+                                    >
+                                      <Copy className="w-3.5 h-3.5" />
+                                    </button>
+                                  </TooltipTrigger>
+                                  <TooltipContent>Copy</TooltipContent>
+                                </Tooltip>
+                              </TooltipProvider>
+                              <TooltipProvider>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <button
+                                      onClick={() => regenerateResponse(index)}
+                                      disabled={isLoading}
+                                      className="p-1.5 rounded-md hover:bg-secondary transition-colors disabled:opacity-50"
+                                    >
+                                      <RefreshCw className="w-3.5 h-3.5" />
+                                    </button>
+                                  </TooltipTrigger>
+                                  <TooltipContent>Regenerate</TooltipContent>
+                                </Tooltip>
+                              </TooltipProvider>
+                              <div className="w-px h-4 bg-border mx-1" />
+                              <TooltipProvider>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <button
+                                      onClick={() => handleFeedback(message.id, 'up')}
+                                      className={`p-1.5 rounded-md hover:bg-secondary transition-colors ${messageFeedback[message.id] === 'up' ? 'text-primary bg-primary/10' : ''}`}
+                                    >
+                                      <ThumbsUp className="w-3.5 h-3.5" />
+                                    </button>
+                                  </TooltipTrigger>
+                                  <TooltipContent>Good response</TooltipContent>
+                                </Tooltip>
+                              </TooltipProvider>
+                              <TooltipProvider>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <button
+                                      onClick={() => handleFeedback(message.id, 'down')}
+                                      className={`p-1.5 rounded-md hover:bg-secondary transition-colors ${messageFeedback[message.id] === 'down' ? 'text-destructive bg-destructive/10' : ''}`}
+                                    >
+                                      <ThumbsDown className="w-3.5 h-3.5" />
+                                    </button>
+                                  </TooltipTrigger>
+                                  <TooltipContent>Bad response</TooltipContent>
+                                </Tooltip>
+                              </TooltipProvider>
+                            </div>
                           )}
                         </div>
                       ) : editingMessageId === message.id ? (
