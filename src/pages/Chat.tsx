@@ -6,7 +6,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
-import { Send, LogOut, Plus, Sparkles, Search, User, Paperclip, Download, FileIcon, Image as ImageIcon, Wand2, Mic, MicOff, FileSearch, Pencil, X, Check, Copy, Keyboard, RefreshCw, ThumbsUp, ThumbsDown } from "lucide-react";
+import { Send, LogOut, Plus, Sparkles, Search, User, Paperclip, Download, FileIcon, Image as ImageIcon, Wand2, Mic, MicOff, FileSearch, Pencil, X, Check, Copy, Keyboard, RefreshCw, ThumbsUp, ThumbsDown, FileText } from "lucide-react";
 import { CodeBlock } from "@/components/CodeBlock";
 import { z } from "zod";
 import ThinkingAnimation from "@/components/ThinkingAnimation";
@@ -65,17 +65,21 @@ const Chat = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
 
+  const handleVoiceTranscript = useCallback((transcript: string) => {
+    setInput((prev) => prev + (prev ? ' ' : '') + transcript);
+  }, []);
+
+  const handleVoiceError = useCallback((error: string) => {
+    toast({
+      title: "Voice Input Error",
+      description: error,
+      variant: "destructive",
+    });
+  }, [toast]);
+
   const { isListening, isSupported: voiceSupported, startListening, stopListening } = useVoiceInput({
-    onTranscript: (transcript) => {
-      setInput((prev) => prev + (prev ? ' ' : '') + transcript);
-    },
-    onError: (error) => {
-      toast({
-        title: "Voice Input Error",
-        description: error,
-        variant: "destructive",
-      });
-    },
+    onTranscript: handleVoiceTranscript,
+    onError: handleVoiceError,
     continuous: true,
   });
 
@@ -131,6 +135,38 @@ const Chat = () => {
       toast({ title: "Failed to copy", variant: "destructive" });
     }
   };
+
+  const exportConversation = useCallback(() => {
+    if (messages.length === 0) {
+      toast({ title: "No messages to export", variant: "destructive" });
+      return;
+    }
+
+    const currentConv = conversations.find(c => c.id === currentConversation);
+    const title = currentConv?.title || "Conversation";
+    
+    let content = `# ${title}\n\n`;
+    content += `Exported on: ${new Date().toLocaleString()}\n\n---\n\n`;
+    
+    messages.forEach((msg) => {
+      const role = msg.role === "user" ? "You" : "Tvog AI";
+      const time = new Date(msg.created_at).toLocaleString();
+      content += `**${role}** (${time}):\n\n${msg.content}\n\n`;
+      if (msg.file_name) {
+        content += `📎 Attached: ${msg.file_name}\n\n`;
+      }
+      content += "---\n\n";
+    });
+
+    const blob = new Blob([content], { type: 'text/markdown' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${title.replace(/[^a-z0-9]/gi, '_')}_${Date.now()}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast({ title: "Conversation exported" });
+  }, [messages, conversations, currentConversation, toast]);
 
   const downloadImage = async (src: string, filename: string = 'generated-image.png') => {
     try {
@@ -1117,7 +1153,26 @@ const Chat = () => {
               </div>
               <h1 className="text-xl font-bold">Tvog AI</h1>
             </div>
-            <ThemeToggle />
+            <div className="flex items-center gap-2">
+              {currentConversation && messages.length > 0 && (
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        onClick={exportConversation}
+                        className="h-9 w-9"
+                      >
+                        <FileText className="w-4 h-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Export Conversation</TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              )}
+              <ThemeToggle />
+            </div>
           </div>
         </div>
 
