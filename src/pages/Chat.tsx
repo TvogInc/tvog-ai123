@@ -6,7 +6,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
-import { Send, LogOut, Plus, Sparkles, Search, User, Paperclip, Download, FileIcon, Image as ImageIcon, Wand2, Mic, MicOff, FileSearch, Pencil, X, Check, Copy, Keyboard, RefreshCw, ThumbsUp, ThumbsDown, FileText, Video } from "lucide-react";
+import { Send, LogOut, Plus, Sparkles, Search, User, Paperclip, Download, FileIcon, Image as ImageIcon, Wand2, Mic, MicOff, FileSearch, Pencil, X, Check, Copy, Keyboard, RefreshCw, ThumbsUp, ThumbsDown, FileText } from "lucide-react";
 import { CodeBlock } from "@/components/CodeBlock";
 import { z } from "zod";
 import ThinkingAnimation from "@/components/ThinkingAnimation";
@@ -62,9 +62,6 @@ const Chat = () => {
   const [showImagePrompt, setShowImagePrompt] = useState(false);
   const [imagePrompt, setImagePrompt] = useState("");
   const [messageFeedback, setMessageFeedback] = useState<Record<string, 'up' | 'down' | null>>({});
-  const [showVideoPrompt, setShowVideoPrompt] = useState(false);
-  const [videoPrompt, setVideoPrompt] = useState("");
-  const [isGeneratingVideo, setIsGeneratingVideo] = useState(false);
   const navigate = useNavigate();
   const { toast } = useToast();
 
@@ -109,11 +106,6 @@ const Chat = () => {
         e.preventDefault();
         setShowImagePrompt(true);
       }
-      // Ctrl/Cmd + Shift + V: Generate video
-      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'V') {
-        e.preventDefault();
-        setShowVideoPrompt(true);
-      }
       // Ctrl/Cmd + M: Toggle voice
       if ((e.ctrlKey || e.metaKey) && e.key === 'm' && voiceSupported) {
         e.preventDefault();
@@ -128,16 +120,12 @@ const Chat = () => {
           setShowImagePrompt(false);
           setImagePrompt("");
         }
-        if (showVideoPrompt) {
-          setShowVideoPrompt(false);
-          setVideoPrompt("");
-        }
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [voiceSupported, toggleVoice, editingMessageId, showImagePrompt, showVideoPrompt]);
+  }, [voiceSupported, toggleVoice, editingMessageId, showImagePrompt]);
 
   const copyToClipboard = async (text: string) => {
     try {
@@ -863,140 +851,6 @@ const Chat = () => {
     }
   };
 
-  const generateVideo = async () => {
-    if (!videoPrompt.trim() || !user) return;
-    
-    setIsGeneratingVideo(true);
-    
-    try {
-      let conversationId = currentConversation;
-      
-      // Create conversation if needed
-      if (!conversationId) {
-        const { data, error } = await supabase
-          .from("conversations")
-          .insert({ user_id: user.id, title: `Video: ${videoPrompt.slice(0, 30)}...` })
-          .select()
-          .single();
-          
-        if (error) throw error;
-        conversationId = data.id;
-        setCurrentConversation(conversationId);
-        loadConversations(user.id);
-      }
-      
-      // Save user request
-      await supabase.from("messages").insert({
-        conversation_id: conversationId,
-        role: "user",
-        content: `🎬 Generate video: ${videoPrompt}`,
-      });
-      
-      await loadMessages(conversationId);
-      
-      // Start video generation
-      const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-video`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
-          },
-          body: JSON.stringify({ prompt: videoPrompt }),
-        }
-      );
-      
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || "Failed to start video generation");
-      }
-      
-      const { predictionId } = await response.json();
-      
-      // Save a pending message
-      const pendingMessageId = crypto.randomUUID();
-      setMessages(prev => [...prev, {
-        id: pendingMessageId,
-        role: "assistant",
-        content: `⏳ Generating your video...\n\n**Prompt:** ${videoPrompt}\n\nThis may take 1-3 minutes. Please wait...`,
-        created_at: new Date().toISOString(),
-      }]);
-      
-      setShowVideoPrompt(false);
-      setVideoPrompt("");
-      
-      // Poll for completion
-      let attempts = 0;
-      const maxAttempts = 60; // 5 minutes max (5s intervals)
-      
-      const pollStatus = async () => {
-        attempts++;
-        
-        const statusResponse = await fetch(
-          `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-video`,
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
-            },
-            body: JSON.stringify({ predictionId }),
-          }
-        );
-        
-        if (!statusResponse.ok) {
-          throw new Error("Failed to check video status");
-        }
-        
-        const prediction = await statusResponse.json();
-        
-        if (prediction.status === 'succeeded') {
-          const videoUrl = prediction.output;
-          
-          // Update the message with the video
-          const videoContent = `Here's your generated video:\n\n<video controls class="max-w-full rounded-lg">\n  <source src="${videoUrl}" type="video/mp4">\n  Your browser does not support the video tag.\n</video>\n\n**Prompt:** ${videoPrompt}`;
-          
-          // Save to database
-          await supabase.from("messages").insert({
-            conversation_id: conversationId,
-            role: "assistant",
-            content: videoContent,
-          });
-          
-          await loadMessages(conversationId!);
-          
-          toast({
-            title: "Video Generated",
-            description: "Your video has been created successfully.",
-          });
-          return;
-        } else if (prediction.status === 'failed') {
-          throw new Error(prediction.error || "Video generation failed");
-        } else if (attempts < maxAttempts) {
-          // Still processing, update message and poll again
-          setMessages(prev => prev.map(m => 
-            m.id === pendingMessageId 
-              ? { ...m, content: `⏳ Generating your video... (${Math.round(attempts * 5 / 60)}min elapsed)\n\n**Prompt:** ${videoPrompt}\n\nThis may take 1-3 minutes. Please wait...` }
-              : m
-          ));
-          setTimeout(pollStatus, 5000);
-        } else {
-          throw new Error("Video generation timed out. Please try again.");
-        }
-      };
-      
-      setTimeout(pollStatus, 5000);
-      
-    } catch (error: any) {
-      toast({
-        title: "Video Generation Failed",
-        description: error.message,
-        variant: "destructive",
-      });
-      setIsGeneratingVideo(false);
-    }
-  };
 
   const renderMessageContent = (content: string) => {
     const parts: JSX.Element[] = [];
@@ -1543,52 +1397,6 @@ const Chat = () => {
           </div>
         )}
 
-        {/* Video Generation Modal */}
-        {showVideoPrompt && (
-          <div className="fixed inset-0 bg-background/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="bg-card border border-border rounded-xl p-6 max-w-md w-full space-y-4 shadow-lg">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-lg bg-gradient-primary flex items-center justify-center">
-                  <Video className="w-5 h-5 text-primary-foreground" />
-                </div>
-                <div>
-                  <h3 className="font-semibold">Generate Video</h3>
-                  <p className="text-sm text-muted-foreground">Describe the video you want to create</p>
-                </div>
-              </div>
-              <Textarea
-                value={videoPrompt}
-                onChange={(e) => setVideoPrompt(e.target.value)}
-                placeholder="A cat playing piano in a jazz club..."
-                className="min-h-[100px]"
-                maxLength={500}
-                autoFocus
-              />
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-muted-foreground">{videoPrompt.length}/500</span>
-                <div className="flex gap-2">
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      setShowVideoPrompt(false);
-                      setVideoPrompt("");
-                    }}
-                  >
-                    Cancel
-                  </Button>
-                  <Button
-                    onClick={generateVideo}
-                    disabled={!videoPrompt.trim() || isGeneratingVideo}
-                    className="bg-gradient-primary"
-                  >
-                    {isGeneratingVideo ? "Starting..." : "Generate"}
-                  </Button>
-                </div>
-              </div>
-              <p className="text-xs text-muted-foreground">Video generation takes 1-3 minutes. Uses Replicate API.</p>
-            </div>
-          </div>
-        )}
 
         <div className="p-4 border-t border-border bg-card">
           <form onSubmit={sendMessage} className="max-w-3xl mx-auto space-y-2">
@@ -1643,23 +1451,6 @@ const Chat = () => {
                   <TooltipContent>Generate Image (Ctrl+I)</TooltipContent>
                 </Tooltip>
               </TooltipProvider>
-              <TooltipProvider>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="icon"
-                      onClick={() => setShowVideoPrompt(true)}
-                      disabled={isLoading || isGeneratingVideo}
-                      className="h-[60px] w-[60px] flex-shrink-0"
-                    >
-                      <Video className="w-5 h-5" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>Generate Video (Ctrl+Shift+V)</TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
               {voiceSupported && (
                 <TooltipProvider>
                   <Tooltip>
@@ -1708,7 +1499,6 @@ const Chat = () => {
               <div className="flex items-center gap-4">
                 <span className="flex items-center gap-1"><Keyboard className="w-3 h-3" /> Ctrl+K: New chat</span>
                 <span>Ctrl+I: Image</span>
-                <span>Ctrl+Shift+V: Video</span>
                 {voiceSupported && <span>Ctrl+M: Voice</span>}
               </div>
               <span>{input.length} / {MAX_MESSAGE_LENGTH}</span>
