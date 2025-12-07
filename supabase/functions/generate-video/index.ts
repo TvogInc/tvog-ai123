@@ -22,6 +22,9 @@ serve(async (req) => {
       )
     }
 
+    // Note: Video generation requires paid API credits. Free alternatives don't exist for production use.
+    // Replicate offers $5 free credits for new accounts.
+
     const replicate = new Replicate({
       auth: REPLICATE_API_KEY,
     })
