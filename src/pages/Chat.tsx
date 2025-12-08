@@ -616,6 +616,49 @@ const Chat = () => {
         .eq("id", conversationId);
 
       loadConversations(user.id);
+
+      // Auto-analyze file if one was uploaded
+      if (fileData) {
+        setIsAnalyzingFile(true);
+        try {
+          const { data: signedUrlData } = await supabase.storage
+            .from('chat-files')
+            .createSignedUrl(fileData.url, 3600);
+
+          if (signedUrlData?.signedUrl) {
+            const analyzeResponse = await fetch(
+              `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/analyze-file`,
+              {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+                },
+                body: JSON.stringify({
+                  fileUrl: signedUrlData.signedUrl,
+                  fileType: fileData.type,
+                  fileName: fileData.name,
+                  prompt: `Analyze this ${fileData.type?.startsWith('image/') ? 'image' : 'file'} and provide detailed insights.`
+                }),
+              }
+            );
+
+            if (analyzeResponse.ok) {
+              const { analysis } = await analyzeResponse.json();
+              await supabase.from("messages").insert({
+                conversation_id: conversationId,
+                role: "assistant",
+                content: `**File Analysis: ${fileData.name}**\n\n${analysis}`,
+              });
+              await loadMessages(conversationId);
+            }
+          }
+        } catch (analyzeError) {
+          console.error("Auto-analyze failed:", analyzeError);
+        } finally {
+          setIsAnalyzingFile(false);
+        }
+      }
     } catch (error: any) {
       toast({
         title: "Error",
