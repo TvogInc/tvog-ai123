@@ -6,7 +6,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
-import { Send, LogOut, Plus, Sparkles, Search, User, Paperclip, Download, FileIcon, Image as ImageIcon, Wand2, Mic, MicOff, FileSearch, Pencil, X, Check, Copy, Keyboard, RefreshCw, ThumbsUp, ThumbsDown, FileText } from "lucide-react";
+import { Send, LogOut, Plus, Sparkles, Search, User, Paperclip, Download, FileIcon, Image as ImageIcon, Wand2, Mic, MicOff, Pencil, X, Check, Copy, Keyboard, RefreshCw, ThumbsUp, ThumbsDown, FileText } from "lucide-react";
 import { CodeBlock } from "@/components/CodeBlock";
 import { z } from "zod";
 import ThinkingAnimation from "@/components/ThinkingAnimation";
@@ -529,95 +529,7 @@ const Chat = () => {
     await loadMessages(conversationId);
 
     try {
-      const allMessages = [...messages, userMessage];
-      
-      const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/chat`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
-          },
-          body: JSON.stringify({ messages: allMessages }),
-        }
-      );
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || "Failed to get response");
-      }
-
-      const reader = response.body?.getReader();
-      const decoder = new TextDecoder();
-      let assistantMessage = "";
-
-      if (!reader) throw new Error("No response stream");
-
-      let buffer = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-
-        let newlineIndex: number;
-        while ((newlineIndex = buffer.indexOf("\n")) !== -1) {
-          let line = buffer.slice(0, newlineIndex);
-          buffer = buffer.slice(newlineIndex + 1);
-
-          if (line.endsWith("\r")) line = line.slice(0, -1);
-          if (line.startsWith(":") || line.trim() === "") continue;
-          if (!line.startsWith("data: ")) continue;
-
-          const jsonStr = line.slice(6).trim();
-          if (jsonStr === "[DONE]") break;
-
-          try {
-            const parsed = JSON.parse(jsonStr);
-            const content = parsed.choices?.[0]?.delta?.content;
-            if (content) {
-              assistantMessage += content;
-              setMessages((prev) => {
-                const last = prev[prev.length - 1];
-                if (last?.role === "assistant") {
-                  return prev.map((m, i) =>
-                    i === prev.length - 1 ? { ...m, content: assistantMessage } : m
-                  );
-                }
-                return [
-                  ...prev,
-                  {
-                    id: crypto.randomUUID(),
-                    role: "assistant",
-                    content: assistantMessage,
-                    created_at: new Date().toISOString(),
-                  },
-                ];
-              });
-            }
-          } catch (e) {
-            buffer = line + "\n" + buffer;
-            break;
-          }
-        }
-      }
-
-      await supabase.from("messages").insert({
-        conversation_id: conversationId,
-        role: "assistant",
-        content: assistantMessage,
-      });
-
-      await supabase
-        .from("conversations")
-        .update({ updated_at: new Date().toISOString() })
-        .eq("id", conversationId);
-
-      loadConversations(user.id);
-
-      // Auto-analyze file if one was uploaded
+      // If a file was uploaded, analyze it directly instead of regular chat
       if (fileData) {
         setIsAnalyzingFile(true);
         try {
@@ -638,7 +550,7 @@ const Chat = () => {
                   fileUrl: signedUrlData.signedUrl,
                   fileType: fileData.type,
                   fileName: fileData.name,
-                  prompt: `Analyze this ${fileData.type?.startsWith('image/') ? 'image' : 'file'} and provide detailed insights.`
+                  prompt: input.trim() || `Analyze this ${fileData.type?.startsWith('image/') ? 'image' : 'file'} and provide detailed insights.`
                 }),
               }
             );
@@ -648,17 +560,113 @@ const Chat = () => {
               await supabase.from("messages").insert({
                 conversation_id: conversationId,
                 role: "assistant",
-                content: `**File Analysis: ${fileData.name}**\n\n${analysis}`,
+                content: analysis,
               });
               await loadMessages(conversationId);
+            } else {
+              throw new Error("Failed to analyze file");
             }
           }
-        } catch (analyzeError) {
-          console.error("Auto-analyze failed:", analyzeError);
+        } catch (analyzeError: any) {
+          console.error("File analysis failed:", analyzeError);
+          toast({
+            title: "Analysis failed",
+            description: analyzeError.message || "Could not analyze the file",
+            variant: "destructive",
+          });
         } finally {
           setIsAnalyzingFile(false);
         }
+      } else {
+        // Regular chat without file
+        const allMessages = [...messages, userMessage];
+        
+        const response = await fetch(
+          `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/chat`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+            },
+            body: JSON.stringify({ messages: allMessages }),
+          }
+        );
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.error || "Failed to get response");
+        }
+
+        const reader = response.body?.getReader();
+        const decoder = new TextDecoder();
+        let assistantMessage = "";
+
+        if (!reader) throw new Error("No response stream");
+
+        let buffer = "";
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+
+          let newlineIndex: number;
+          while ((newlineIndex = buffer.indexOf("\n")) !== -1) {
+            let line = buffer.slice(0, newlineIndex);
+            buffer = buffer.slice(newlineIndex + 1);
+
+            if (line.endsWith("\r")) line = line.slice(0, -1);
+            if (line.startsWith(":") || line.trim() === "") continue;
+            if (!line.startsWith("data: ")) continue;
+
+            const jsonStr = line.slice(6).trim();
+            if (jsonStr === "[DONE]") break;
+
+            try {
+              const parsed = JSON.parse(jsonStr);
+              const content = parsed.choices?.[0]?.delta?.content;
+              if (content) {
+                assistantMessage += content;
+                setMessages((prev) => {
+                  const last = prev[prev.length - 1];
+                  if (last?.role === "assistant") {
+                    return prev.map((m, i) =>
+                      i === prev.length - 1 ? { ...m, content: assistantMessage } : m
+                    );
+                  }
+                  return [
+                    ...prev,
+                    {
+                      id: crypto.randomUUID(),
+                      role: "assistant",
+                      content: assistantMessage,
+                      created_at: new Date().toISOString(),
+                    },
+                  ];
+                });
+              }
+            } catch (e) {
+              buffer = line + "\n" + buffer;
+              break;
+            }
+          }
+        }
+
+        await supabase.from("messages").insert({
+          conversation_id: conversationId,
+          role: "assistant",
+          content: assistantMessage,
+        });
       }
+
+      await supabase
+        .from("conversations")
+        .update({ updated_at: new Date().toISOString() })
+        .eq("id", conversationId);
+
+      loadConversations(user.id);
     } catch (error: any) {
       toast({
         title: "Error",
@@ -1005,68 +1013,6 @@ const Chat = () => {
     }
   };
 
-  const analyzeFile = async (message: Message) => {
-    if (!message.file_url || !currentConversation) return;
-    
-    setIsAnalyzingFile(true);
-    
-    try {
-      // Get the signed URL for the file
-      const { data: signedUrlData } = await supabase.storage
-        .from('chat-files')
-        .createSignedUrl(message.file_url, 3600);
-
-      if (!signedUrlData?.signedUrl) {
-        throw new Error("Could not get file URL");
-      }
-
-      const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/analyze-file`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
-          },
-          body: JSON.stringify({
-            fileUrl: signedUrlData.signedUrl,
-            fileType: message.file_type,
-            fileName: message.file_name,
-            prompt: `Analyze this ${message.file_type?.startsWith('image/') ? 'image' : 'file'} and provide detailed insights.`
-          }),
-        }
-      );
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || "Failed to analyze file");
-      }
-
-      const { analysis } = await response.json();
-
-      // Save analysis as assistant message
-      await supabase.from("messages").insert({
-        conversation_id: currentConversation,
-        role: "assistant",
-        content: `**File Analysis: ${message.file_name}**\n\n${analysis}`,
-      });
-
-      await loadMessages(currentConversation);
-
-      toast({
-        title: "Analysis Complete",
-        description: "File has been analyzed successfully.",
-      });
-    } catch (error: any) {
-      toast({
-        title: "Analysis Failed",
-        description: error.message,
-        variant: "destructive",
-      });
-    } finally {
-      setIsAnalyzingFile(false);
-    }
-  };
 
   const renderFileAttachment = (message: Message) => {
     if (!message.file_url || !message.file_name) return null;
@@ -1096,16 +1042,6 @@ const Chat = () => {
                 <Download className="w-8 h-8 text-white" />
               </div>
             </div>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => analyzeFile(message)}
-              disabled={isAnalyzingFile}
-              className="text-xs"
-            >
-              <FileSearch className="w-3 h-3 mr-1" />
-              {isAnalyzingFile ? "Analyzing..." : "Analyze Image"}
-            </Button>
           </div>
         ) : (
           <div className="space-y-2">
@@ -1120,16 +1056,6 @@ const Chat = () => {
               </div>
               <Download className="w-4 h-4 text-muted-foreground flex-shrink-0" />
             </button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => analyzeFile(message)}
-              disabled={isAnalyzingFile}
-              className="text-xs"
-            >
-              <FileSearch className="w-3 h-3 mr-1" />
-              {isAnalyzingFile ? "Analyzing..." : "Analyze File"}
-            </Button>
           </div>
         )}
       </div>
