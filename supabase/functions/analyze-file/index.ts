@@ -47,15 +47,32 @@ serve(async (req) => {
         }
       ];
     } else {
-      // For documents/text files, analyze the content
+      // For documents/text files, fetch the actual file content first
+      console.log("Fetching file content from:", fileUrl);
+      
+      let fileContent = "";
+      try {
+        const fileResponse = await fetch(fileUrl);
+        if (fileResponse.ok) {
+          fileContent = await fileResponse.text();
+          console.log("File content fetched, length:", fileContent.length);
+        } else {
+          console.error("Failed to fetch file:", fileResponse.status);
+          throw new Error(`Failed to fetch file: ${fileResponse.status}`);
+        }
+      } catch (fetchError) {
+        console.error("Error fetching file:", fetchError);
+        throw new Error("Could not fetch file content");
+      }
+
       messages = [
         {
           role: "system",
-          content: "You are a helpful AI assistant that analyzes documents and files. Provide insights, summaries, and answer questions about the content."
+          content: "You are a helpful AI assistant that analyzes documents, code, and files. Provide detailed insights, explanations, and answer questions about the content. When analyzing code, explain what it does, how it works, and any notable patterns or issues."
         },
         {
           role: "user",
-          content: prompt || `Please analyze this file (${fileName}) and provide a summary of its contents.`
+          content: `Here is the content of the file "${fileName}":\n\n\`\`\`\n${fileContent}\n\`\`\`\n\n${prompt || "Please analyze this file and explain what it does."}`
         }
       ];
     }
